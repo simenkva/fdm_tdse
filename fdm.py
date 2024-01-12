@@ -34,6 +34,23 @@ def laplace_stencil_1d(order=2):
     
     return data, offsets   
 
+
+def fdm_laplacian_1d_nonuniform(x):
+    
+    n = len(x)
+    L = np.zeros((len(x), len(x)))
+    
+    for i in range(1, n-1):
+        h1 = x[i] - x[i-1]
+        h2 = x[i+1] - x[i]
+        L[i ,i-1] = 2 / (h1 * (h1 + h2))
+        L[i, i] = -2 / (h1 * h2)
+        L[i, i+1] = 2 / (h2 * (h1 + h2))
+
+    return L[1:-1, 1:-1], x[1:-1]
+        
+    
+
 def fdm_laplacian_1d(x_min, x_max, n, order=2):
     """Construct a 1D discretization of the Laplacian operator with Dirichlet
     boundary conditions, using 2, 4 or 6 order FDM.
