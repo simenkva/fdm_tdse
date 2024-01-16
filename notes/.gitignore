@@ -1,0 +1,25 @@
+# LaTeX build files
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+
+# LaTeX document output
+*.pdf
+
+# LaTeX editor temporary files
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.dvi
+*.xdv
+
+# LaTeX editor project files
+*.vscode
+*.sublime-project
+*.sublime-workspace
+*.texstudio
+*.texstudio.bak
+*Notes.bib
