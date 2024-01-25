@@ -3,6 +3,7 @@ import scipy as sp
 import time
 from poisson_solvers import PoissonSpherical
 from matplotlib import pyplot as plt
+import tqdm
 
 gs_state = np.load("helium_groundstate.npz")
 
@@ -32,38 +33,41 @@ nr = 799
 r = np.linspace(0, r_max, nr + 2)
 dr = r[1] - r[0]
 
+dt = 0.1
+t_diag = np.ones(nr) / dr**2
+t_subdiag = -0.5 * np.ones(nr) / dr**2
+t_upperdiag = -0.5 * np.ones(nr) / dr**2
+t_upperdiag[0] = 0
+t_subdiag[-1] = 0
+v_diag = -Z / r[1:-1]
+
+I_p_1jH0_diag_l = np.zeros((l_max, nr), dtype=np.complex128)
+for l in range(l_max):
+    I_p_1jH0_diag_l[l] = np.ones(nr) + 1j * dt / 2 * (
+        t_diag + v_diag + l * (l + 1) / (2 * r[1:-1] ** 2)
+    )
+I_p_1jH0_subdiag = 1j * dt / 2 * t_subdiag
+I_p_1jH0_upperdiag = 1j * dt / 2 * t_upperdiag
+
+###############################################################################
 poisson = PoissonSpherical(r, l_max=l_max)
 
-u = np.zeros((l_max, nr), dtype=np.complex128)
-u[0] = np.complex128(gs_state["u0"])
 
-tic = time.time()
-ug = np.einsum("IJK,Ki->IJi", gaunt_coeffs, u)
-rho = np.einsum("IJi,Ji->Ii", ug, np.conj(u))
-toc = time.time()
-print(f"Time for computing rho: {toc - tic:.3f} s")
-
-W = np.zeros((l_max, nr), dtype=np.complex128)
-tic = time.time()
-for l in range(l_max):
-    b = -4 * np.pi / r[1:-1] * rho[l]
-    if l == 0:
-        w_rmax = np.sqrt(4 * np.pi)  # Boundary condition at r_max when l=0.
-    else:
-        w_rmax = 0
-    w_l = poisson.solve(l=l, f=b, w_rmax=w_rmax)
-    W[l] = w_l / r[1:-1]
-toc = time.time()
-print(f"Time for computing W: {toc - tic:.3f} s")
-
-EH = (
-    sp.integrate.simps(W[0] * np.abs(u[0] ** 2), r[1:-1])
-    * gaunt_coeffs[0, 0, 0]
-)
-print(f"EH: {EH:.4f}")
+def compute_W(rho):
+    W = np.zeros((l_max, nr), dtype=np.complex128)
+    for l in range(l_max):
+        b = -4 * np.pi / r[1:-1] * rho[l]
+        if l == 0:
+            w_rmax = np.sqrt(4 * np.pi)  # Boundary condition at r_max when l=0.
+        else:
+            w_rmax = 0
+        w_l = poisson.solve(l=l, f=b, w_rmax=w_rmax)
+        W[l] = w_l / r[1:-1]
+    return W
 
 
-def Tu(u):
+###############################################################################
+def Tu_mult(u):
 
     Tu = np.zeros(u.shape, u.dtype)
     l_max = u.shape[0]
@@ -77,14 +81,99 @@ def Tu(u):
     return Tu
 
 
-tic = time.time()
-Hu = Tu(u)
-Hu -= Z * np.einsum("K, lK->lK", 1 / r[1:-1], u)
-Wu = np.einsum("IJi, Ji->Ii", ug, W)
-Fu = Hu + Wu
-toc = time.time()
-print(f"Time for computing Fu: {toc - tic:.3f} s")
+###############################################################################
 
-eps = sp.integrate.simps(np.conj(u[0]) * Fu[0], r[1:-1]).real
+ut = np.zeros((l_max, nr), dtype=np.complex128)
+ut[0] = np.complex128(gs_state["u0"])
+
+
+num_steps = 1000
+t_final = num_steps * dt
+print(f"Final time: {t_final:.3f}")
+
+eps = np.zeros(num_steps, dtype=np.complex128)
+EH = np.zeros(num_steps, dtype=np.complex128)
+norm = np.zeros(num_steps, dtype=np.complex128)
+time_points = np.zeros(num_steps)
+
+print()
+for n in tqdm.tqdm(range(num_steps - 1)):
+    time_points[n] = n * dt
+    # print(ut[0, 0])
+    # tic = time.time()
+    ut_g = np.einsum("IJK,Ki->IJi", gaunt_coeffs, ut)
+    rho = np.einsum("IJi,Ji->Ii", ut_g, np.conj(ut))
+    # toc = time.time()
+    # print(f"Time for computing rho: {toc - tic:.3f} s")
+
+    # tic = time.time()
+    W = compute_W(rho)
+    # toc = time.time()
+    # print(f"Time for computing W: {toc - tic:.3f} s")
+
+    norm[n] = sp.integrate.simps(np.abs(ut[0] ** 2), r[1:-1])
+    EH[n] = (
+        sp.integrate.simps(W[0] * np.abs(ut[0] ** 2), r[1:-1])
+        * gaunt_coeffs[0, 0, 0]
+    )
+
+    # tic = time.time()
+    Tu = Tu_mult(ut)
+    Vu = -Z * np.einsum("K, lK->lK", 1 / r[1:-1], ut)
+    Wu = np.einsum("IJi, Ji->Ii", ut_g, W)
+    Fu = Tu + Vu + Wu
+    # toc = time.time()
+    # print(f"Time for computing Fu: {toc - tic:.3f} s")
+
+    eps[n] = sp.integrate.simps(np.conj(ut[0]) * Fu[0], r[1:-1]).real
+
+    ut_tilde = ut - 1j * dt / 2 * Fu
+
+    tic = time.time()
+    fj = np.zeros((l_max, nr), dtype=np.complex128)
+    for l in range(l_max):
+        fj[l] = sp.linalg.solve_banded(
+            (1, 1),
+            np.array(
+                [I_p_1jH0_upperdiag, I_p_1jH0_diag_l[l], I_p_1jH0_subdiag]
+            ),
+            ut_tilde[l],
+        )
+    ut = fj.copy()
+
+    max_iters = 100
+    iters = 1
+    while np.linalg.norm(fj.ravel()) > 1e-10 and iters < max_iters:
+        fj_g = np.einsum("IJK,Ki->IJi", gaunt_coeffs, fj)
+        Vext_fj = -1j * dt / 2 * np.einsum("IJi,Ji->Ii", fj_g, W)
+        for l in range(l_max):
+            fj[l] = sp.linalg.solve_banded(
+                (1, 1),
+                np.array(
+                    [I_p_1jH0_upperdiag, I_p_1jH0_diag_l[l], I_p_1jH0_subdiag]
+                ),
+                Vext_fj[l],
+            )
+        ut += fj
+        iters += 1
+    toc = time.time()
+    # print(f"Number of iterations: {iters}")
+    # print(f"Time for computing ut_new: {toc - tic:.3f} s")
+    # print()
+
+
 e_hf = 2 * eps - EH.real
-print(f"orbital energy {eps:.4f}, Hartree-Fock energy: {e_hf:.4f}")
+
+plt.figure()
+plt.subplot(311)
+plt.plot(time_points[:-1], e_hf[:-1].real - e_hf[0].real, label=r"$E_{HF}$")
+# plt.plot(time_points, eps.real, label=r"$\epsilon$")
+plt.subplot(312)
+plt.plot(time_points[:-1], EH[:-1].real - EH[0].real, label=r"$E_H$")
+plt.subplot(313)
+plt.plot(time_points[:-1], eps[:-1].real - eps[0].real, label=r"$\epsilon$")
+
+plt.figure()
+plt.plot(time_points[:-1], 1 - norm[:-1].real, label=r"$\int |\psi|^2$")
+
+plt.show()
