@@ -315,6 +315,8 @@ if __name__ == "__main__":
         ic(alpha,beta)
         plt.loglog(1.0/n_list, E_error[:,i], '*-', label=f'E_{i}, alpha = {alpha}')
     plt.legend()
+    plt.xlabel('n = n_r = n_z')
+    plt.ylabel('Energy error for HO eigenstates, 3d, m=0')
     plt.show()
     
     
