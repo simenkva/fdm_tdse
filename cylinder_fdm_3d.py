@@ -286,6 +286,19 @@ def sample(n):
     E_error = np.abs(E - np.array([1.5, 2.5, 3.5, 3.5, 4.5, 4.5, 5.5, 5.5, 5.5, 6.5]))
 
     ic(E_error)
+    
+    # plot a few eigenstates
+    if n == 150:
+        for k in [0, 1, 2, 3, 4]:
+            psi_0 = U[:,k].reshape(solver.shape)[0,...]
+            psi = solver.G_r_neumann @ solver.Rm12 @ psi_0 
+            plt.figure()
+            plt.imshow(np.abs(psi)**2, extent=[-solver.z_max, solver.z_max, 0, solver.r_max], aspect='auto', origin='lower')
+            plt.title(f'psi_{k}, E_{k} = {E[k]}')
+            plt.xlabel('z')
+            plt.ylabel('r')
+            plt.colorbar()
+        
     return E_error
     
     # plt.figure()
