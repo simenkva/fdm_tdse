@@ -16,11 +16,11 @@ def laplace_stencil_1d(order=2):
         offsets = [-1, 0, 1]
     elif order == 4:
         data = np.zeros((5,1))
-        data[0, :] = 1 / 12
-        data[1, :] = -16 / 12
-        data[2, :] = 30 / 12
-        data[3, :] = -16 / 12
-        data[4, :] = 1 / 12
+        data[0, :] = -1 / 12
+        data[1, :] = 16 / 12
+        data[2, :] = -30 / 12
+        data[3, :] = 16 / 12
+        data[4, :] = -1 / 12
         offsets = [-2, -1, 0, 1, 2]
     elif order == 6:
         data = np.zeros((7,1))
@@ -262,9 +262,9 @@ class cylinder_fdm_3d:
     #         raise ValueError("Unknown order: {}".format(order))
         
         
-if __name__ == "__main__":
-    
-    solver = cylinder_fdm_3d(r_max = 10, z_max = 10, n_r = 100, n_z = 200, n_m = 1)
+        
+def sample(n):
+    solver = cylinder_fdm_3d(r_max = 10, z_max = 10, n_r = n, n_z = n, n_m = 0)
 
     rr, zz = np.meshgrid(solver.r_inner, solver.z_inner, indexing='ij')    
     ic(rr.shape, zz.shape)
@@ -276,17 +276,71 @@ if __name__ == "__main__":
     ic('Computing sparse matrix')
     H_mat_sparse = solver.get_sparse_matrix()
     ic('Computing eigenvalues')
-    E, U = eigsh(H_mat_sparse, k=6, sigma = 1.4)
+    E, U = eigsh(H_mat_sparse, k=10, sigma = 1.2)
+    i = np.argsort(E)
+    E = E[i]
+    U = U[:,i]
+    
     ic(E)
     
+    E_error = np.abs(E - np.array([1.5, 2.5, 3.5, 3.5, 4.5, 4.5, 5.5, 5.5, 5.5, 6.5]))
+
+    ic(E_error)
+    return E_error
+    
+    # plt.figure()
+    # psi_0 = U[:,0].reshape(solver.shape)[0,...]
+    # psi = solver.G_r_neumann @ solver.Rm12 @ psi_0 
+    # plt.imshow(np.abs(psi)**2, extent=[-solver.z_max, solver.z_max, 0, solver.r_max], aspect='auto', origin='lower')
+    # plt.title('Numeric')
+    # plt.xlabel('z')
+    # plt.ylabel('r')
+    # plt.colorbar()
+    # plt.show()
+ 
+    
+    
+if __name__ == "__main__":
+    
+
+    n_list = np.array([100, 120, 150])
+    E_error = np.zeros((len(n_list), 10))
+    for i in range(len(n_list)):
+        E_error[i] = sample(n_list[i])
+        ic(E_error[i])
+        
     plt.figure()
-    psi_0 = U[:,5].reshape(solver.shape)[0,...]
-    psi = solver.G_r_neumann @ solver.Rm12 @ psi_0 
-    plt.imshow(np.abs(psi)**2, extent=[-solver.z_max, solver.z_max, 0, solver.r_max], aspect='auto', origin='lower')
-    plt.title('Numeric')
-    plt.xlabel('z')
-    plt.ylabel('r')
-    plt.colorbar()
+    for i in range(10):
+        alpha, beta = np.polyfit(np.log(1.0/n_list), np.log(E_error[:,i]), 1)
+        ic(alpha,beta)
+        plt.loglog(1.0/n_list, E_error[:,i], '*-', label=f'E_{i}, alpha = {alpha}')
+    plt.legend()
     plt.show()
+    
+    
+    # solver = cylinder_fdm_3d(r_max = 10, z_max = 10, n_r = 100, n_z = 100, n_m = 0)
+
+    # rr, zz = np.meshgrid(solver.r_inner, solver.z_inner, indexing='ij')    
+    # ic(rr.shape, zz.shape)
+    
+    # V_m = []
+    # V_m.append(0.5*(rr**2 + zz**2))
+    # solver.set_potential(V_m)
+    
+    # ic('Computing sparse matrix')
+    # H_mat_sparse = solver.get_sparse_matrix()
+    # ic('Computing eigenvalues')
+    # E, U = eigsh(H_mat_sparse, k=10, sigma = 1.5)
+    # ic(E)
+    
+    # plt.figure()
+    # psi_0 = U[:,0].reshape(solver.shape)[0,...]
+    # psi = solver.G_r_neumann @ solver.Rm12 @ psi_0 
+    # plt.imshow(np.abs(psi)**2, extent=[-solver.z_max, solver.z_max, 0, solver.r_max], aspect='auto', origin='lower')
+    # plt.title('Numeric')
+    # plt.xlabel('z')
+    # plt.ylabel('r')
+    # plt.colorbar()
+    # plt.show()
     
     
