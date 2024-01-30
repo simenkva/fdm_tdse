@@ -296,5 +296,48 @@ where $\bar{R}$ is the diagonal matrix with elements $\bar{r}_j$.
 Thus, we obtain an operator $-\delta_h^- \bar{R} \delta_h^+$, and this is precisely the finite difference scheme for $L_0$.
 
 
+\section{Analytical results}
+
+We compute the kinetic energy matrix. We let $u_j(r)$ be a piecewise linear FEM basis function. For $j=0$ and $j=n+1$, the function is nonzero only on the interval $[0,h]$ and $[r_\text{max}-h,r_\text{max}]$, respectively. Otherwise, the function is nonzero on the interval $[r_{j-1},r_{j+1}]$. We note that the function is continuous, and that the derivative is constant on each interval. The derivative is given by the forward difference formula,
+\begin{equation}
+    u_j'(r) = \begin{cases}
+        h^{-1} & r_{j-1} \leq r \leq r_j, \\
+        -h^{-1} & r_j \leq r \leq r_{j+1}, \\
+        0 & \text{otherwise}.
+    \end{cases}
+\end{equation}
+
+\subsection{Mass matrix diagonal elements}
+
+We begin with the mass matrix. We have
+\begin{equation}
+    \mathsf{S}_{k,l} = \braket{u_k,u_l}_r = \int_0^{r_\text{max}} u_k(r) u_l(r) r \; dr.    
+\end{equation}
+For $k=l$, and $k$ an inner grid point, we have
+\begin{align}
+    \mathsf{S}_{k,k} &= \int_{r_{k-1}}^{r_{k+1}} u_k(r)^2 r \; dr \\
+    &= \int_{r_{k-1}}^{r_k} ((r-r_{k-1}) h^{-1})^2 r dr + \int_{r_k}^{r_{k+1}} (1 - h^{-1}(r - r_{k}))^2 r dr \\
+    &= \int_0^h (h^{-1} r)^2 (r + r_{k-1}) dr + \int_0^h (1 - h^{-1} r)^2 (r + r_{k}) dr \\
+    &= h^{-2} \int_0^h (r^3 + r_{k-1} r^2) dr + h^{-2} \int_0^h (h^2 + r^2 - 2 hr)(r + r_k) dr   \\
+    &= h^{-2} [ \frac{1}{4} h^4 + \frac{1}{3} r_{k-1} h^3] + h^{-2} \int_0^h (rh^2 + r^3 - 2hr^2 + h^2 r_k + r^2 r_k - 2hr r_k) dr \\
+    &= h^{-2} [ \frac{1}{4} h^4 + \frac{1}{3} r_{k-1} h^3] 
+    + h^{-2} [ \frac{1}{2}h^4 + \frac{1}{4} h^4 - \frac{2}{3} h^4 + h^3 r_k + \frac{1}{3} h^3 r_k - h^3 r_k ] \\
+    & = \frac{1}{3} h^2 + \frac{1}{3} h r_{k-1} + \frac{1}{3} h r_k .
+\end{align}
+For symmetry, it is better to express this in terms of $r_k$ only. We have
+\begin{equation}
+    \mathsf{S}_{k,k} = \frac{1}{3} h^2 + \frac{1}{3} h (r_k - h) + \frac{1}{3} h r_k  = \frac{1}{3} h^2 + \frac{2}{3} h r_k - \frac{1}{3} h^2 = \frac{2}{3} h r_k.
+\end{equation}
+For $k=0$, only the second integral contributes, and we get
+\begin{equation}
+    \mathsf{S}_{0,0} = \int_0^h (1 - h^{-1} r)^2 r dr = \frac{1}{3} h^2.
+\end{equation}
+
+For $k=n+1$, only the first integral contributes, and we get
+\begin{equation}
+    \mathsf{S}_{n+1,n+1} = \frac{1}{4} h^2 + \frac{1}{3} (r_\text{max}-h) h
+ = \frac{1}{4} h^2 + \frac{1}{3} r_\text{max} h - \frac{1}{3} h^2 = \frac{1}{3} r_\text{max} h + \frac{1}{12} h^2.
+\end{equation}
+
 
 \end{document}
