@@ -6,6 +6,7 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.linalg import eigh
 from time import time
 
+
 def radial_fdm_laplacian(r_max, n, left_bc = 'neumann_simple'):
     """Generate laplacian in 2d polar coordinates, radial part only.
     
@@ -307,3 +308,4 @@ if __name__ == '__main__':
 
     print('shape = ', H_mat_sparse.shape)
     print('nnz = ', H_mat_sparse.getnnz())
+    
