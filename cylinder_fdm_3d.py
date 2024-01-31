@@ -4,6 +4,9 @@ from polar_fdm_2d import radial_fdm_laplacian
 from scipy.sparse import spdiags, csr_matrix, lil_matrix
 from scipy.sparse.linalg import LinearOperator, eigsh
 import matplotlib.pyplot as plt
+from time import time
+from timeit import timeit
+
 
 def laplace_stencil_1d(order=2):
     # Construct the 1D Laplacian operator stencil
@@ -163,6 +166,8 @@ class cylinder_fdm_3d:
         ic()
         ic(self.n_r, self.n_z, self.n_m)
         ic(self.r_max, self.z_max)
+        ic(self.n_dof)
+        
         
     def set_potential(self, V_m):
         """ Set the scalar potential.
@@ -200,7 +205,6 @@ class cylinder_fdm_3d:
         
         for m in range(-self.n_m, self.n_m+1):
             m_index = m + self.n_m
-            #ic(m, m_index)
             result[m_index,...] = self.T_m[abs(m)] @ psi_reduced[m_index,...] # acts on first dimension, which is radial.
             result[m_index,...] += psi_reduced[m_index,...] @ self.T_z.T # acts on second dimension, which is vertical.
             for m2 in range(-self.V_m_max, self.V_m_max+1):
@@ -214,8 +218,83 @@ class cylinder_fdm_3d:
         return result
     
 
+    def get_sparse_matrix_fast(self):
+        """Compute sparse matrix representation of H in a faster way than the
+        brute force approach. """
+        
+        #
+        # Potential energy matrix
+        #
+        start = time()
+   
+        data = np.zeros((2*self.V_m_max+1, self.n_r * self.n_z), dtype=complex) # data to hold diagonals
+        for m in range(-self.V_m_max, self.V_m_max+1):
+            m_ind = m + self.V_m_max
+            data[m_ind, :] = self.V_m[m_ind].flatten()
+        diagonals = np.arange(-self.V_m_max, self.V_m_max+1) * self.n_r * self.n_z
+        # duplicate diagonals to account for the fact that the matrix is block diagonal
+        data = np.tile(data, 2*self.n_m+1)
+        #ic(data.shape, diagonals.shape, diagonals)
+        
+        H_pot = spdiags(data, diagonals, self.n_dof, self.n_dof)
+
+        time_taken_potential = time() - start
+        ic(time_taken_potential)
+ 
+        #
+        # Kinetic enery matrix
+        #
+        
+        start = time()
+         
+        H_kin = lil_matrix((self.n_dof, self.n_dof), dtype=np.complex128)
+       
+      
+        for m in range(-self.n_m, self.n_m+1):
+            m_ind = m + self.n_m
+            
+            #ic(m_ind)
+                        
+            block_start = m_ind * self.n_r * self.n_z
+            #ic(block_start)
+            #ic(H_kin.shape)
+            # vertical kinetic energy
+            # for each radial point, we must add the vertical kinetic energy to the diagonal
+            for j in range(self.n_r):
+                bstart = m_ind * self.n_r * self.n_z + self.n_z * j
+                bend = bstart + self.n_z
+                stride = 1
+                H_kin[bstart:bend:stride, bstart:bend:stride] += self.T_z
+                
+            # radial/angular kinetic energy
+            #ic(self.T_m[m].shape)
+            for k in range(self.n_z):
+                bstart = m_ind * self.n_r * self.n_z + k
+                bend = bstart + self.n_r * self.n_z
+                stride = self.n_z
+                #H_mat[block_start + k:block_start + k + self.n_r*self.n_z:self.n_z, block_start + k:block_start + k + self.n_r*self.n_z:self.n_z ] += self.T_m[m]
+                H_kin[bstart:bend:stride, bstart:bend:stride] += self.T_m[m]
+            
+
+        time_taken_kinetic = time() - start
+        ic(time_taken_kinetic)
+
+        start = time()
+        H_tot = H_kin + H_pot
+        H = csr_matrix(H_tot)
+        time_taken_conversion = time() - start
+        ic(time_taken_conversion)
+        
+        return H
+               
+                    
+                    
+                    
+            
     def get_sparse_matrix(self):
         """Compute sparse matrix representation of H."""
+        
+
         def apply_hamiltonian(psi_vec):
             return self.apply_hamiltonian(psi_vec.reshape(self.shape)).flatten()
 
@@ -229,9 +308,45 @@ class cylinder_fdm_3d:
             e[i] = 1
             H_mat[:,i] = self.apply_hamiltonian(e.reshape(self.shape)).flatten()
             
+
         return csr_matrix(H_mat)
 
             
+    def imag_time_prop_ode(self, P):
+        
+        # P is assumed to have shape (n_dof, n_psi) and to have orthonormal columns
+        
+        n_psi = P.shape[1]
+        assert(P.shape[0] == self.n_dof)
+        result = np.zeros((self.n_dof, n_psi), dtype=np.complex128)
+        for i in range(n_psi):
+            result[:,i] = self.apply_hamiltonian(P[:,i].reshape(self.shape)).flatten()
+        
+        H = P.conjugate().T @ result
+        result = result - P @ H
+            
+        return result, np.linalg.eigh(.5*(H + H.T.conjugate()))[0]
+        
+        
+    def imag_time_prop(self, psi_list, dt, n_steps):
+        
+        # psi_list is assumed to have shape (n_dof, n_psi)
+        
+        # orthogonalize
+        P, R = np.linalg.qr(psi_list)
+
+        for i in range(n_steps):    
+            dP, Evals =  self.imag_time_prop_ode(P)
+            ic(np.linalg.norm(dP), np.sum(Evals))
+            P = P + dt * dP
+            P, R = np.linalg.qr(P)
+        
+            
+
+        return P
+
+        
+
 
 
     # def reorder_dimensions(self, psi, order='mzr'):
@@ -263,18 +378,42 @@ class cylinder_fdm_3d:
         
         
         
-def sample(n):
-    solver = cylinder_fdm_3d(r_max = 10, z_max = 10, n_r = n, n_z = n, n_m = 0)
+def sample(n, fast = True):
+    n_m = 4
+    solver = cylinder_fdm_3d(r_max = 10, z_max = 10, n_r = n, n_z = n , n_m = n_m)
 
     rr, zz = np.meshgrid(solver.r_inner, solver.z_inner, indexing='ij')    
     ic(rr.shape, zz.shape)
-    
+
+    x0 = 0.0
+    y0 = 0.0
+    alpha = x0 - 1j*y0
+    z0 = 0.0
     V_m = []
-    V_m.append(0.5*(rr**2 + zz**2))
+    V_m.append(-alpha*0.5*rr)
+    V_m.append(0.5*(zz-z0)**2 + 0.5*rr**2 + 0.5*np.abs(alpha)**2)
+    V_m.append(-alpha.conjugate()*0.5*rr)
+
+    # V_m = []
+    # V_m.append(0.5*(rr**2 + zz**2))
     solver.set_potential(V_m)
     
     ic('Computing sparse matrix')
-    H_mat_sparse = solver.get_sparse_matrix()
+    
+    
+    if fast:
+        start = time()
+        H_mat_sparse = solver.get_sparse_matrix_fast()
+        time_taken_sparse = time() - start
+        ic(time_taken_sparse)
+    else:
+        
+        start = time()
+        H_mat_sparse = solver.get_sparse_matrix()
+        time_taken_sparse_slow = time() - start
+        ic(time_taken_sparse_slow)
+
+        
     ic('Computing eigenvalues')
     E, U = eigsh(H_mat_sparse, k=10, sigma = 1.2)
     i = np.argsort(E)
@@ -283,14 +422,20 @@ def sample(n):
     
     ic(E)
     
-    E_error = np.abs(E - np.array([1.5, 2.5, 3.5, 3.5, 4.5, 4.5, 5.5, 5.5, 5.5, 6.5]))
+    E_error = np.abs(E - np.array([1.5, 2.5, 2.5, 2.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5]))
 
     ic(E_error)
     
+    
+    # P_init = np.random.rand(solver.n_dof, 1)
+    # P = solver.imag_time_prop(P_init, dt = 0.01, n_steps = 1000)
+    
+    
+    
     # plot a few eigenstates
-    if n == 150:
+    if n == 100:
         for k in [0, 1, 2, 3, 4]:
-            psi_0 = U[:,k].reshape(solver.shape)[0,...]
+            psi_0 = U[:,k].reshape(solver.shape)[n_m,...]
             psi = solver.G_r_neumann @ solver.Rm12 @ psi_0 
             plt.figure()
             plt.imshow(np.abs(psi)**2, extent=[-solver.z_max, solver.z_max, 0, solver.r_max], aspect='auto', origin='lower')
@@ -316,12 +461,12 @@ def sample(n):
 if __name__ == "__main__":
     
 
-    n_list = np.array([100, 120, 150])
+    n_list = np.array([50, 70, 80, 100])
     E_error = np.zeros((len(n_list), 10))
     for i in range(len(n_list)):
         E_error[i] = sample(n_list[i])
         ic(E_error[i])
-        
+    
     plt.figure()
     for i in range(10):
         alpha, beta = np.polyfit(np.log(1.0/n_list), np.log(E_error[:,i]), 1)
