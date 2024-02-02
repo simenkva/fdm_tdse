@@ -188,7 +188,7 @@ class CylinderFDM:
         for m in range(-self.V_m_max, self.V_m_max+1):
             assert(self.V_m[m].shape == (self.n_r, self.n_z))
         
-    def set_td_potential(self, V_m):
+    def set_td_potential(self, D_m):
         """ Set the time-dependent scalar potential.
         
         The function accepts a list of potentials, interpreted as a partial
@@ -198,9 +198,9 @@ class CylinderFDM:
         Args:
             V_m (list of ndarray): list of potential matrices V(r) for each m.
         """
-        self.D_m = V_m
+        self.D_m = D_m
         
-        self.D_m_max = (len(V_m) - 1)//2
+        self.D_m_max = (len(D_m) - 1)//2
         ic()
         ic(self.D_m_max)
         
@@ -211,7 +211,7 @@ class CylinderFDM:
 
 
     def apply_hamiltonian_multi(self, psi_reduced_mat):
-        """ Apply Hamiltonian to a set of wavefunctions. Not tested yet. """
+        """ Apply Hamiltonian to a set of wavefunctions. NOT TESTED YET. """
         assert(len(psi_reduced_mat.shape) == len(self.shape) + 1)
         assert(psi_reduced_mat.shape[:-1] == self.shape)
         n_vec = psi_reduced_mat.shape[-1]
@@ -250,10 +250,39 @@ class CylinderFDM:
         
         return result
     
+    def apply_td_potential(self, psi_reduced):
+        """Apply the time-dependent potential to a (reduced) wavefunction.
+        
+        NOT TESTED YET
+        
+        Args:
+            psi_reduced (ndarray): reduced wavefunction of shape (n_r, 2*m_max+1)
+            
+        Returns:
+            Application of the time-dependent potential to psi.
+        """
+        
+        
+        assert(psi_reduced.shape == self.shape)
+        result = np.zeros(self.shape, dtype=np.complex128)
+        
+        for m in range(-self.n_m, self.n_m+1):
+            m_index = m + self.n_m
+            for m2 in range(-self.D_m_max, self.D_m_max+1):
+                m2_index = self.D_m_max + m2
+                m3 = m - m2
+                if m3 >= -self.n_m and m3 <= self.n_m:
+                    m3_index = m3 + self.n_m
+                    #ic(m_index, m2_index, m3_index)
+                    result[m_index,...] += self.D_m[m2_index] * psi_reduced[m3_index,...]
+        
+        return result
+    
 
     def get_sparse_matrix_fast(self, kinetic=True, potential=True, potential_td=False):
         """Compute sparse matrix representation of H in a faster way than the
-        brute force approach. """
+        brute force approach. I have tested that the brute force way and this very
+        fast way gives identical results. """
         
         return_me = csr_matrix((self.n_dof, self.n_dof), dtype=np.complex128)
         
@@ -318,7 +347,8 @@ class CylinderFDM:
                 
             
     def get_sparse_matrix(self):
-        """Compute sparse matrix representation of H."""
+        """Compute sparse matrix representation of H. This is a brute force approach. The other method
+        get_sparse_matrix_fast is much faster. """
         
 
         def apply_hamiltonian(psi_vec):
@@ -339,7 +369,7 @@ class CylinderFDM:
 
             
     def imag_time_prop_ode(self, P):
-        
+        """ TESTING """
         # P is assumed to have shape (n_dof, n_psi) and to have orthonormal columns
         
         n_psi = P.shape[1]
@@ -355,6 +385,7 @@ class CylinderFDM:
         
         
     def imag_time_prop(self, psi_list, dt, n_steps):
+        """ TESTING """
         
         # psi_list is assumed to have shape (n_dof, n_psi)
         
