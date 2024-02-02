@@ -1,7 +1,7 @@
 from icecream import ic
 import numpy as np
 from polar_fdm_2d import radial_fdm_laplacian
-from scipy.sparse import spdiags, csr_matrix, lil_matrix
+from scipy.sparse import spdiags, csr_matrix, lil_matrix, kron, identity, block_diag
 from scipy.sparse.linalg import LinearOperator, eigsh
 import matplotlib.pyplot as plt
 from time import time
@@ -100,7 +100,7 @@ def fdm_laplacian_1d(x_min, x_max, n_inner, order=2):
     return L, x, csr_matrix(G)
 
 
-class cylinder_fdm_3d:
+class CylinderFDM:
     
     def __init__(self, r_max, z_max, n_r, n_z, n_m):
         """Set up the cylinder coordinate grid. The wavefunction is decomposed into (2*n_m + 1) partial waves, and
@@ -188,7 +188,40 @@ class cylinder_fdm_3d:
         for m in range(-self.V_m_max, self.V_m_max+1):
             assert(self.V_m[m].shape == (self.n_r, self.n_z))
         
+    def set_td_potential(self, V_m):
+        """ Set the time-dependent scalar potential.
+        
+        The function accepts a list of potentials, interpreted as a partial
+        wave expansion of the potential. The list is assumed to have `len(V_m) = 2*V_m_max+1` 
+        entries, where the `V_m_max+m`-th entry is the potential matrix for `m`.
+        
+        Args:
+            V_m (list of ndarray): list of potential matrices V(r) for each m.
+        """
+        self.D_m = V_m
+        
+        self.D_m_max = (len(V_m) - 1)//2
+        ic()
+        ic(self.D_m_max)
+        
+        for m in range(-self.D_m_max, self.D_m_max+1):
+            assert(self.D_m[m].shape == (self.n_r, self.n_z))
+        
 
+
+
+    def apply_hamiltonian_multi(self, psi_reduced_mat):
+        """ Apply Hamiltonian to a set of wavefunctions. Not tested yet. """
+        assert(len(psi_reduced_mat.shape) == len(self.shape) + 1)
+        assert(psi_reduced_mat.shape[:-1] == self.shape)
+        n_vec = psi_reduced_mat.shape[-1]
+        
+        result = np.zeros_like(psi_reduced_mat)
+        for i in range(n_vec):
+            result[...,i] = self.apply_hamiltonian(psi_reduced_mat[...,i])
+            
+        return result
+        
     def apply_hamiltonian(self, psi_reduced):
         """Apply the Hamiltonian to a reduced wavefunction.
         
@@ -218,78 +251,71 @@ class cylinder_fdm_3d:
         return result
     
 
-    def get_sparse_matrix_fast(self):
+    def get_sparse_matrix_fast(self, kinetic=True, potential=True, potential_td=False):
         """Compute sparse matrix representation of H in a faster way than the
         brute force approach. """
         
-        #
-        # Potential energy matrix
-        #
-        start = time()
-   
-        data = np.zeros((2*self.V_m_max+1, self.n_r * self.n_z), dtype=complex) # data to hold diagonals
-        for m in range(-self.V_m_max, self.V_m_max+1):
-            m_ind = m + self.V_m_max
-            data[m_ind, :] = self.V_m[m_ind].flatten()
-        diagonals = np.arange(-self.V_m_max, self.V_m_max+1) * self.n_r * self.n_z
-        # duplicate diagonals to account for the fact that the matrix is block diagonal
-        data = np.tile(data, 2*self.n_m+1)
-        #ic(data.shape, diagonals.shape, diagonals)
+        return_me = csr_matrix((self.n_dof, self.n_dof), dtype=np.complex128)
         
-        H_pot = spdiags(data, diagonals, self.n_dof, self.n_dof)
-
-        time_taken_potential = time() - start
-        ic(time_taken_potential)
- 
-        #
-        # Kinetic enery matrix
-        #
-        
-        start = time()
-         
-        H_kin = lil_matrix((self.n_dof, self.n_dof), dtype=np.complex128)
-       
-      
-        for m in range(-self.n_m, self.n_m+1):
-            m_ind = m + self.n_m
+        if potential:
+            #
+            # Potential energy matrix
+            #
+            data = np.zeros((2*self.V_m_max+1, self.n_r * self.n_z), dtype=complex) # data to hold diagonals
+            for m in range(-self.V_m_max, self.V_m_max+1):
+                m_ind = m + self.V_m_max
+                data[m_ind, :] = self.V_m[m_ind].flatten()
+            #diagonals = np.arange(-self.V_m_max, self.V_m_max+1) * self.n_r * self.n_z
+            diagonals = np.flip(np.arange(-self.V_m_max, self.V_m_max+1)) * self.n_r * self.n_z
+            # duplicate diagonals to account for the fact that the matrix is block diagonal
+            data = np.tile(data, 2*self.n_m+1)
+            #ic(data.shape, diagonals.shape, diagonals)
             
-            #ic(m_ind)
-                        
-            block_start = m_ind * self.n_r * self.n_z
-            #ic(block_start)
-            #ic(H_kin.shape)
-            # vertical kinetic energy
-            # for each radial point, we must add the vertical kinetic energy to the diagonal
-            for j in range(self.n_r):
-                bstart = m_ind * self.n_r * self.n_z + self.n_z * j
-                bend = bstart + self.n_z
-                stride = 1
-                H_kin[bstart:bend:stride, bstart:bend:stride] += self.T_z
+            self.H_pot = spdiags(data, diagonals, self.n_dof, self.n_dof)
+            return_me += self.H_pot
+            
+        if potential_td:
+            #
+            # Time-dependent potential energy matrix
+            #
+            data = np.zeros((2*self.D_m_max+1, self.n_r * self.n_z), dtype=complex)
+            for m in range(-self.D_m_max, self.D_m_max+1):
+                m_ind = m + self.D_m_max
+                data[m_ind, :] = self.D_m[m_ind].flatten()
+            diagonals = np.flip(np.arange(-self.D_m_max, self.D_m_max+1)) * self.n_r * self.n_z
+            data = np.tile(data, 2*self.n_m+1)
+            self.H_pot_td = spdiags(data, diagonals, self.n_dof, self.n_dof)
+            
+            
+        if kinetic:
+
+    
+            #
+            # Kinetic enery matrix
+            #
+            
+            T_z_kron = kron(identity(self.n_r, format='csr'), self.T_z, format='csr')
+            blocks = []
+            for m in range(-self.n_m, self.n_m+1):
+                T_m_kron = kron(self.T_m[np.abs(m)], identity(self.n_z, format='csr'), format='csr')
+                blocks.append(T_m_kron + T_z_kron)
                 
-            # radial/angular kinetic energy
-            #ic(self.T_m[m].shape)
-            for k in range(self.n_z):
-                bstart = m_ind * self.n_r * self.n_z + k
-                bend = bstart + self.n_r * self.n_z
-                stride = self.n_z
-                #H_mat[block_start + k:block_start + k + self.n_r*self.n_z:self.n_z, block_start + k:block_start + k + self.n_r*self.n_z:self.n_z ] += self.T_m[m]
-                H_kin[bstart:bend:stride, bstart:bend:stride] += self.T_m[m]
-            
-
-        time_taken_kinetic = time() - start
-        ic(time_taken_kinetic)
-
-        start = time()
-        H_tot = H_kin + H_pot
-        H = csr_matrix(H_tot)
-        time_taken_conversion = time() - start
-        ic(time_taken_conversion)
+            self.H_kin = block_diag(blocks, format='csr')
+            return_me += self.H_kin
         
-        return H
+        if kinetic and potential:
+            ic('Setting total Hamiltonian as self.H_tot')
+            self.H_tot = self.H_kin + self.H_pot
+        
+        # Return H_kin + H_tot if td_potential is False
+        # Return (H_kin + H_tot,  H_pot_td) if td_potential is True
+        if potential_td:
+            return return_me, self.H_pot_td
+        else:
+            return return_me
                
                     
-                    
-                    
+                
             
     def get_sparse_matrix(self):
         """Compute sparse matrix representation of H."""
