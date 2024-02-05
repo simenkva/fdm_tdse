@@ -88,13 +88,17 @@ def fdm_laplacian_1d(x_min, x_max, n_inner, order=2):
 class CylinderFDM:
     
     def __init__(self, r_max, z_max, n_r, n_z, n_m):
-        """Set up the cylinder coordinate grid. The wavefunction is decomposed into n_m partial waves, assumed to be an even number, and
-        each partial wave is discretized on a grid with n_r x n_z *inner* grid points. The domain is 0 <= r <= r_max, 
-        -z_max <= z <= z_max. The wavefunction is thus a tensor psi of shape (n_m, n_r, n_z), where psi[i_m, :, :] is the spatial function of
+        """Set up the cylinder coordinate grid. The wavefunction is discretized on a 3d grid, where the first dimension
+        is the L_z angular momentum quantum number, the second dimension is the radial direction in the xy-plane, and the 
+        third dimension is the vertizal z-axis.
+        
+        The shape of the wavefunction psi is (n_m, n_r, n_z), where n_m is the number of angular momentum quantum numbers, n_r is the number
+        of radial grid points, and n_z is the number of vertical grid points. The component psi[i_m, :, :] is the spatial function of the
         partial wave number m. The index i_m is such that 0 <= i_m < n_m, and the corresponding angular momentum
         quantum numver runs from m=0 (i_m=0) to m=n_m/2-1, jumps to m=-n_m/2 and increases to -1 (i_m = n_m-1). This is the default convention
         inherited from the FFT library.
-        
+
+        The spatial domain is 0 <= r <= r_max, -z_max <= z <= z_max.        
         
         Args:
             r_max (float): right endpoint for radial domain, 0 <= r <= r_max
@@ -238,6 +242,8 @@ class CylinderFDM:
             self.rotation_symmetric_potential = True
             assert(V.shape == (self.n_r, self.n_z))
             self.V = V
+            ic('Warning:  rotation symmetric potential not implemented in time propagation yet.')
+
         else:
             self.rotation_symmetric_potential = False
             assert(V.shape == (self.n_m, self.n_r, self.n_z))
@@ -265,6 +271,7 @@ class CylinderFDM:
             self.rotation_symmetric_td_potential = True
             assert(D.shape == (self.n_r, self.n_z))
             self.D = D
+            ic('Warning:  rotation symmetric potential not implemented in time propagation yet.')
         else:
             self.rotation_symmetric_td_potential = False
             assert(D.shape == (self.n_m, self.n_r, self.n_z))
@@ -281,45 +288,6 @@ class CylinderFDM:
         """
         
         self.modulator = modulator
-        
-        
-    # def set_potential(self, V_m):
-    #     """ Set the scalar potential.
-        
-    #     The function accepts a list of potentials, interpreted as a partial
-    #     wave expansion of the potential. The list is assumed to have `len(V_m) = 2*V_m_max+1` 
-    #     entries, where the `V_m_max+m`-th entry is the potential matrix for `m`.
-        
-    #     Args:
-    #         V_m (list of ndarray): list of potential matrices V(r) for each m.
-    #     """
-    #     self.V_m = V_m
-        
-    #     self.V_m_max = (len(V_m) - 1)//2
-    #     ic()
-    #     ic(self.V_m_max)
-        
-    #     for m in range(-self.V_m_max, self.V_m_max+1):
-    #         assert(self.V_m[m].shape == (self.n_r, self.n_z))
-        
-    # def set_td_potential(self, D_m):
-    #     """ Set the time-dependent scalar potential.
-        
-    #     The function accepts a list of potentials, interpreted as a partial
-    #     wave expansion of the potential. The list is assumed to have `len(V_m) = 2*V_m_max+1` 
-    #     entries, where the `V_m_max+m`-th entry is the potential matrix for `m`.
-        
-    #     Args:
-    #         V_m (list of ndarray): list of potential matrices V(r) for each m.
-    #     """
-    #     self.D_m = D_m
-        
-    #     self.D_m_max = (len(D_m) - 1)//2
-    #     ic()
-    #     ic(self.D_m_max)
-        
-    #     for m in range(-self.D_m_max, self.D_m_max+1):
-    #         assert(self.D_m[m].shape == (self.n_r, self.n_z))
         
 
 
@@ -396,7 +364,10 @@ class CylinderFDM:
     def get_sparse_matrix_fast(self, kinetic=True, potential=True, potential_td=False):
         """Compute sparse matrix representation of H in a faster way than the
         brute force approach. I have tested that the brute force way and this very
-        fast way gives identical results. """
+        fast way gives identical results. 
+        
+        This matrix is not used in propagation, but can be useful for other purposes.
+        """
         
         return_me = csr_matrix((self.n_dof, self.n_dof), dtype=np.complex128)
         
@@ -494,44 +465,6 @@ class CylinderFDM:
         return csr_matrix(H_mat)
 
             
-    # def imag_time_prop_ode(self, P):
-    #     """ TESTING """
-    #     # P is assumed to have shape (n_dof, n_psi) and to have orthonormal columns
-        
-    #     n_psi = P.shape[1]
-    #     assert(P.shape[0] == self.n_dof)
-    #     result = np.zeros((self.n_dof, n_psi), dtype=np.complex128)
-    #     for i in range(n_psi):
-    #         result[:,i] = self.apply_hamiltonian(P[:,i].reshape(self.shape)).flatten()
-        
-    #     H = P.conjugate().T @ result
-    #     result = result - P @ H
-            
-    #     return result, np.linalg.eigh(.5*(H + H.T.conjugate()))[0]
-        
-        
-    # def imag_time_prop(self, psi_list, dt, n_steps):
-    #     """ TESTING """
-        
-    #     # psi_list is assumed to have shape (n_dof, n_psi)
-        
-    #     # orthogonalize
-    #     P, R = np.linalg.qr(psi_list)
-
-    #     for i in range(n_steps):    
-    #         dP, Evals =  self.imag_time_prop_ode(P)
-    #         ic(np.linalg.norm(dP), np.sum(Evals))
-    #         P = P + dt * dP
-    #         P, R = np.linalg.qr(P)
-        
-            
-
-    #     return P
-
-
-       
-
-
         
     def setup_splitting_scheme(self, dt):
         """Set up the  splitting scheme for the time-dependent Schrödinger equation. """
@@ -548,7 +481,24 @@ class CylinderFDM:
 
         
     def propagate_crank_nicolson(self, psi, t = 0):
-        """Propagate the wavefunction using the Crank-Nicolson method."""
+        """Propagate the wavefunction using the Crank-Nicolson method.
+        
+        
+        Time propagation over a time step h is approximated as follows:
+        The full time-dependent Hamiltonian is
+        $$ H(t) = T_z + T_\rho + V + U(t), $$
+        where $U(t)$ is a time-dependent potential, and where $T_z$ is the kinetic energy in the z-direction, $T_\rho$ is the kinetic energy in the radial direction
+        and which includes the angular momentum terms. We employ a symmetric splitting scheme of local order $O(h^3)$ as follows:
+        
+        $$ \psi(t+h) = U_V(t + 3h/4) U_z U_\rho U_V(t+h/4), $$
+        where 
+        $$ U_V(t) e^{-i(h/2)(V + U(t))} $$
+        and where 
+        $$ U_z = e^{-ih T_z}, \quad U_\rho = e^{-ih T_\rho} $$
+        
+        I should explain this better at some point.        
+        
+        """
         
         dt = self.dt
         shape = psi.shape
@@ -580,35 +530,7 @@ class CylinderFDM:
         
                    
         return psi
-        
-
-
-    # def reorder_dimensions(self, psi, order='mzr'):
-    #     """Reorder the dimensions of a wavefunction psi. The default order is 'mzr', which means that the wavefunction
-    #     is ordered as psi[m, z, r]. Any order is possible, e.g., 'zmr'.
-                
-    #     Args:
-    #         psi (numpy.ndarray): wavefunction
-    #         order (str, optional): order of dimensions. Defaults to 'mzr'.
-        
-    #     Returns:
-    #         numpy.ndarray: reordered wavefunction
-    #     """
-        
-    #     if order == 'mzr':
-    #         return psi
-    #     elif order == 'zmr':
-    #         return np.transpose(psi, (1, 0, 2))
-    #     elif order == 'rmz':
-    #         return np.transpose(psi, (2, 0, 1))
-    #     elif order == 'zrm':
-    #         return np.transpose(psi, (1, 2, 0))
-    #     elif order == 'rmz':
-    #         return np.transpose(psi, (2, 0, 1))
-    #     elif order == 'zrm':
-    #         return np.transpose(psi, (1, 2, 0))
-    #     else:
-    #         raise ValueError("Unknown order: {}".format(order))
+    
         
         
         
@@ -616,24 +538,16 @@ def sample(n, fast = True):
     n_m = 4
     solver = CylinderFDM(r_max = 10, z_max = 10, n_r = n, n_z = n , n_m = n_m)
 
-    rr, zz = np.meshgrid(solver.r_inner, solver.z_inner, indexing='ij')    
+    rr, zz = solver.get_rz_meshgrid()    
     ic(rr.shape, zz.shape)
 
-    x0 = 0.0
-    y0 = 0.0
-    alpha = x0 - 1j*y0
-    z0 = 0.0
-    V_m = []
-    V_m.append(-alpha*0.5*rr)
-    V_m.append(0.5*(zz-z0)**2 + 0.5*rr**2 + 0.5*np.abs(alpha)**2)
-    V_m.append(-alpha.conjugate()*0.5*rr)
+    V = 0.5*(rr**2 + zz**2)
 
     # V_m = []
     # V_m.append(0.5*(rr**2 + zz**2))
-    solver.set_potential(V_m)
+    solver.set_realspace_potential(V, rotation_symmetric=True)
     
     ic('Computing sparse matrix')
-    
     
     if fast:
         start = time()
@@ -656,7 +570,7 @@ def sample(n, fast = True):
     
     ic(E)
     
-    E_error = np.abs(E - np.array([1.5, 2.5, 2.5, 2.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5]))
+    E_error = np.abs(E - np.array([1.5, 2.5, 2.5, 2.5, 3.5, 3.5, 3.5, 3.5, 3.5, 4.5]))
 
     ic(E_error)
     
@@ -669,7 +583,7 @@ def sample(n, fast = True):
     # plot a few eigenstates
     if n == 100:
         for k in [0, 1, 2, 3, 4]:
-            psi_0 = U[:,k].reshape(solver.shape)[n_m,...]
+            psi_0 = U[:,k].reshape(solver.shape)[0,...]
             psi = solver.G_r_neumann @ solver.Rm12 @ psi_0 
             plt.figure()
             plt.imshow(np.abs(psi)**2, extent=[-solver.z_max, solver.z_max, 0, solver.r_max], aspect='auto', origin='lower')
