@@ -44,3 +44,12 @@ class ErfgauPotential:
             
         V = V0 + self.c*np.exp(-self.alpha**2*r2)
         return -V
+
+    def potential_radial(self, r):
+
+        r2 = r*r
+
+        V0 = np.vectorize(self.long_range)(r)
+            
+        V = V0 + self.c*np.exp(-self.alpha**2*r2)
+        return -V

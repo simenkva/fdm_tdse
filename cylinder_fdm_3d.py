@@ -1,8 +1,8 @@
 from icecream import ic
 import numpy as np
 from polar_fdm_2d import radial_fdm_laplacian
-from scipy.sparse import spdiags, csr_matrix, lil_matrix, kron, identity, block_diag
-from scipy.sparse.linalg import LinearOperator, eigsh
+from scipy.sparse import spdiags, csr_matrix, csc_matrix, lil_matrix, kron, identity, block_diag, bmat
+from scipy.sparse.linalg import LinearOperator, eigsh, expm_multiply, gmres, expm, splu
 import matplotlib.pyplot as plt
 from time import time
 from timeit import timeit
@@ -40,21 +40,6 @@ def laplace_stencil_1d(order=2):
     
     return data, offsets   
 
-
-# def fdm_laplacian_1d_nonuniform(x):
-    
-#     n = len(x)
-#     L = np.zeros((len(x), len(x)))
-    
-#     for i in range(1, n-1):
-#         h1 = x[i] - x[i-1]
-#         h2 = x[i+1] - x[i]
-#         L[i ,i-1] = 2 / (h1 * (h1 + h2))
-#         L[i, i] = -2 / (h1 * h2)
-#         L[i, i+1] = 2 / (h2 * (h1 + h2))
-
-#     return L[1:-1, 1:-1], x[1:-1]
-        
     
 
 def fdm_laplacian_1d(x_min, x_max, n_inner, order=2):
@@ -103,16 +88,20 @@ def fdm_laplacian_1d(x_min, x_max, n_inner, order=2):
 class CylinderFDM:
     
     def __init__(self, r_max, z_max, n_r, n_z, n_m):
-        """Set up the cylinder coordinate grid. The wavefunction is decomposed into (2*n_m + 1) partial waves, and
+        """Set up the cylinder coordinate grid. The wavefunction is decomposed into n_m partial waves, assumed to be an even number, and
         each partial wave is discretized on a grid with n_r x n_z *inner* grid points. The domain is 0 <= r <= r_max, 
-        -z_max <= z <= z_max.
+        -z_max <= z <= z_max. The wavefunction is thus a tensor psi of shape (n_m, n_r, n_z), where psi[i_m, :, :] is the spatial function of
+        partial wave number m. The index i_m is such that 0 <= i_m < n_m, and the corresponding angular momentum
+        quantum numver runs from m=0 (i_m=0) to m=n_m/2-1, jumps to m=-n_m/2 and increases to -1 (i_m = n_m-1). This is the default convention
+        inherited from the FFT library.
+        
         
         Args:
             r_max (float): right endpoint for radial domain, 0 <= r <= r_max
             z_max (float): right endpoint for z domain, -z_max <= z <= z_max
             n_r (int): number of inner grid points
             n_z (int): number of inner grid points
-            n_m (int): maximum angular momentum, i.e., -n_m <= m <= n_m
+            n_m (int): maximum angular momentum, i.e., -n_m/2 <= m < n_m/2
         """
         
         # Set up grid parameters
@@ -121,6 +110,9 @@ class CylinderFDM:
         self.n_r = n_r
         self.n_z = n_z
         self.n_m = n_m
+        #  f = [0, 1, ...,   n/2-1,     -n/2, ..., -1] 
+        self.m_i = np.fft.fftfreq(self.n_m, 1/self.n_m)
+        ic(self.m_i)
         
         # Compute radial Laplacians and grid
         L_r_neumann, r, G_r_neumann = radial_fdm_laplacian(r_max, n_r, left_bc = 'neumann')
@@ -140,6 +132,9 @@ class CylinderFDM:
         self.z_inner = self.z[1:-1]
         self.T_z = -0.5*self.L_z
 
+        # angular grid
+        self.theta = np.linspace(0, 2*np.pi, self.n_m, endpoint=False)
+
         # Transition from reduced to full wavefunction
         self.Rm12 = spdiags(self.r_inner**(-.5), 0, self.n_r, self.n_r)
         # Transition from full to reduced wavefunction
@@ -147,18 +142,22 @@ class CylinderFDM:
         
         
         
-        # Set up radial Kinetic energy for each |m|
+        # Set up radial Kinetic energy for each |m|.
         self.T_m = []
-        for m in range(self.n_m+1):
-            if m == 0:
+        for i_m in range(self.n_m):
+            if i_m == 0:
                 self.T_m.append( -0.5*self.L_r_neumann  )
             else:
+                m = self.m_i[i_m]
                 self.T_m.append( -0.5*self.L_r_dirichlet + spdiags(.5*m**2/self.r_inner**2, 0, self.n_r, self.n_r))
                 
                 
-                
+        # set up default time dependent potential modulator, which
+        # is trivial
+        self.modulator = lambda t: 1.0
+        
         # Wavefunction shape
-        self.shape = (2*n_m + 1, n_r, n_z)
+        self.shape = (n_m, n_r, n_z)
         self.n_dof = np.prod(self.shape)
                
     
@@ -168,44 +167,159 @@ class CylinderFDM:
         ic(self.r_max, self.z_max)
         ic(self.n_dof)
         
+    def get_trz_meshgrid(self):
+        """Return the meshgrid of the angular, radial and vertical coordinates."""
+        return np.meshgrid(self.theta, self.r_inner, self.z_inner, indexing='ij')
+    
+    def get_rz_meshgrid(self):
+        """Return the meshgrid of the radial and vertical coordinates."""
+        return np.meshgrid(self.r_inner, self.z_inner, indexing='ij')
         
-    def set_potential(self, V_m):
+    def fourier_analysis_of_potential(self, V):
+        """ Perform a Fourier analysis of the potential V. """
+        
+        # make sure we have the right size of the tensor
+        assert(V.shape == (self.n_m, self.n_r, self.n_z))
+        
+        # Fourier transform in the angular direction
+        V_FFT = np.fft.fft(V, axis=0) / self.n_m 
+        
+        # Determine the maximum value of |m| that contributes to the
+        # potential.
+        m_max = 0
+        for i in range(self.n_m):
+            m = self.m_i[i]
+            N = np.linalg.norm(V_FFT[i, :, :])
+            ic(m, N)
+            ic(V_FFT[i, :, :])
+            if N > 1e-10 and np.abs(m) > m_max:
+                    m_max = np.abs(m)
+
+
+        ic(m_max)
+        
+        # Create a vector of the potential contributions
+        V_m = []
+        m_list = []
+        for i in range(self.n_m):
+            m = self.m_i[i]
+            if np.abs(m) <= m_max:
+                ic(m)
+                m_list.append(m)
+                V_m.append(V_FFT[i, :, :])
+        # sort the list in order of increasing m.
+        idx = np.argsort(m_list)
+        m_list = [m_list[i] for i in idx]
+        V_m = [V_m[i] for i in idx]
+        
+        for i in range(len(V_m)):
+            ic(m_list[i], np.linalg.norm(V_m[i]))
+        
+        return V_m
+        
+    def set_realspace_potential(self, V, rotation_symmetric=False):
         """ Set the scalar potential.
         
-        The function accepts a list of potentials, interpreted as a partial
-        wave expansion of the potential. The list is assumed to have `len(V_m) = 2*V_m_max+1` 
-        entries, where the `V_m_max+m`-th entry is the potential matrix for `m`.
+        The function accepts a potential matrix V(r, z) if rotation_symmetric is True, 
+        and a potential matrix V(theta, r, z) if rotation_symmetric is False. In the latter case,
+        the wavefunction is Fourier transformed in the angular direction before the potential is applied.
+        In the former case, the potential is applied directly to the wavefunction's radial and vertical
+        directions for each partial wave.
         
         Args:
-            V_m (list of ndarray): list of potential matrices V(r) for each m.
+            V (ndarray): potential matrix V(r, z) if rotation_symmetric is True,
+                and a potential matrix V(theta, r, z) if rotation_symmetric is False.
+            rotation_symmetric (bool): True if the potential is rotation symmetric, False otherwise.
+            
         """
-        self.V_m = V_m
         
-        self.V_m_max = (len(V_m) - 1)//2
-        ic()
-        ic(self.V_m_max)
         
-        for m in range(-self.V_m_max, self.V_m_max+1):
-            assert(self.V_m[m].shape == (self.n_r, self.n_z))
-        
-    def set_td_potential(self, D_m):
+        if rotation_symmetric:
+            self.rotation_symmetric_potential = True
+            assert(V.shape == (self.n_r, self.n_z))
+            self.V = V
+        else:
+            self.rotation_symmetric_potential = False
+            assert(V.shape == (self.n_m, self.n_r, self.n_z))
+            self.V = V
+            self.V_m = self.fourier_analysis_of_potential(V)
+            
+    def set_td_potential(self, D, rotation_symmetric=False):
         """ Set the time-dependent scalar potential.
         
-        The function accepts a list of potentials, interpreted as a partial
-        wave expansion of the potential. The list is assumed to have `len(V_m) = 2*V_m_max+1` 
-        entries, where the `V_m_max+m`-th entry is the potential matrix for `m`.
+        The function accepts a potential matrix D(r, z) if rotation_symmetric is True, 
+        and a potential matrix D(theta, r, z) if rotation_symmetric is False. In the latter case,
+        the wavefunction is Fourier transformed in the angular direction before the potential is applied.
+        In the former case, the potential is applied directly to the wavefunction's radial and vertical
+        directions for each partial wave.
         
         Args:
-            V_m (list of ndarray): list of potential matrices V(r) for each m.
+            D (ndarray): potential matrix D(r, z) if rotation_symmetric is True,
+                and a potential matrix D(theta, r, z) if rotation_symmetric is False.
+            rotation_symmetric (bool): True if the potential is rotation symmetric, False otherwise.
+            
         """
-        self.D_m = D_m
         
-        self.D_m_max = (len(D_m) - 1)//2
-        ic()
-        ic(self.D_m_max)
         
-        for m in range(-self.D_m_max, self.D_m_max+1):
-            assert(self.D_m[m].shape == (self.n_r, self.n_z))
+        if rotation_symmetric:
+            self.rotation_symmetric_td_potential = True
+            assert(D.shape == (self.n_r, self.n_z))
+            self.D = D
+        else:
+            self.rotation_symmetric_td_potential = False
+            assert(D.shape == (self.n_m, self.n_r, self.n_z))
+            self.D = D
+        
+        
+    def set_td_potential_modulator(self, modulator):
+        """Set the time-dependent potential's modulator, a callable function of time.
+        
+        The modulator is a function of time that returns a scalar factor that multiplies the time-dependent potential,
+
+        $$ D(t, theta, r, z) = modulator(t) * D(theta, r, z). $$
+
+        """
+        
+        self.modulator = modulator
+        
+        
+    # def set_potential(self, V_m):
+    #     """ Set the scalar potential.
+        
+    #     The function accepts a list of potentials, interpreted as a partial
+    #     wave expansion of the potential. The list is assumed to have `len(V_m) = 2*V_m_max+1` 
+    #     entries, where the `V_m_max+m`-th entry is the potential matrix for `m`.
+        
+    #     Args:
+    #         V_m (list of ndarray): list of potential matrices V(r) for each m.
+    #     """
+    #     self.V_m = V_m
+        
+    #     self.V_m_max = (len(V_m) - 1)//2
+    #     ic()
+    #     ic(self.V_m_max)
+        
+    #     for m in range(-self.V_m_max, self.V_m_max+1):
+    #         assert(self.V_m[m].shape == (self.n_r, self.n_z))
+        
+    # def set_td_potential(self, D_m):
+    #     """ Set the time-dependent scalar potential.
+        
+    #     The function accepts a list of potentials, interpreted as a partial
+    #     wave expansion of the potential. The list is assumed to have `len(V_m) = 2*V_m_max+1` 
+    #     entries, where the `V_m_max+m`-th entry is the potential matrix for `m`.
+        
+    #     Args:
+    #         V_m (list of ndarray): list of potential matrices V(r) for each m.
+    #     """
+    #     self.D_m = D_m
+        
+    #     self.D_m_max = (len(D_m) - 1)//2
+    #     ic()
+    #     ic(self.D_m_max)
+        
+    #     for m in range(-self.D_m_max, self.D_m_max+1):
+    #         assert(self.D_m[m].shape == (self.n_r, self.n_z))
         
 
 
@@ -235,46 +349,46 @@ class CylinderFDM:
         
         assert(psi_reduced.shape == self.shape)
         result = np.zeros(self.shape, dtype=np.complex128)
+
+        # apply kinetic energy        
+        for i_m in range(self.n_m):
+            m = self.m_i[i_m]
+            result[i_m,...] = self.T_m[i_m] @ psi_reduced[i_m,...] # acts on first dimension, which is radial.
+            result[i_m,...] += psi_reduced[i_m,...] @ self.T_z.T # acts on second dimension, which is vertical.
+
         
-        for m in range(-self.n_m, self.n_m+1):
-            m_index = m + self.n_m
-            result[m_index,...] = self.T_m[abs(m)] @ psi_reduced[m_index,...] # acts on first dimension, which is radial.
-            result[m_index,...] += psi_reduced[m_index,...] @ self.T_z.T # acts on second dimension, which is vertical.
-            for m2 in range(-self.V_m_max, self.V_m_max+1):
-                m2_index = self.V_m_max + m2
-                m3 = m - m2
-                if m3 >= -self.n_m and m3 <= self.n_m:
-                    m3_index = m3 + self.n_m
-                    #ic(m_index, m2_index, m3_index)
-                    result[m_index,...] += self.V_m[m2_index] * psi_reduced[m3_index,...]
+        # apply potential energy
+        if self.rotation_symmetric_potential:
+            # potential is only a function of rho and z
+            for i_m in range(self.n_m):
+                result[i_m,...] += self.V * psi_reduced[i_m,...]
+        else:            
+            # potential is also a function of theta
+            phi_reduced = np.fft.ifft(psi_reduced, axis=0)
+            V_phi_reduced = self.V * phi_reduced
+            result += np.fft.fft(V_phi_reduced, axis=0)
         
         return result
     
-    def apply_td_potential(self, psi_reduced):
+    def apply_td_potential(self, psi_reduced, t):
         """Apply the time-dependent potential to a (reduced) wavefunction.
         
         NOT TESTED YET
-        
-        Args:
-            psi_reduced (ndarray): reduced wavefunction of shape (n_r, 2*m_max+1)
-            
-        Returns:
-            Application of the time-dependent potential to psi.
         """
-        
         
         assert(psi_reduced.shape == self.shape)
         result = np.zeros(self.shape, dtype=np.complex128)
         
-        for m in range(-self.n_m, self.n_m+1):
-            m_index = m + self.n_m
-            for m2 in range(-self.D_m_max, self.D_m_max+1):
-                m2_index = self.D_m_max + m2
-                m3 = m - m2
-                if m3 >= -self.n_m and m3 <= self.n_m:
-                    m3_index = m3 + self.n_m
-                    #ic(m_index, m2_index, m3_index)
-                    result[m_index,...] += self.D_m[m2_index] * psi_reduced[m3_index,...]
+        # apply time-dendent potential energy
+        if self.rotation_symmetric_td_potential:
+            # potential is only a function of rho and z
+            for i_m in range(self.n_m):
+                result[i_m,...] += self.modulator(t) * self.D * psi_reduced[i_m,...]
+        else:            
+            # potential is also a function of theta
+            phi_reduced = np.fft.ifft(psi_reduced, axis=0)
+            V_phi_reduced = self.modulator(t) * self.D * phi_reduced
+            result += np.fft.fft(V_phi_reduced, axis=0)
         
         return result
     
@@ -290,30 +404,42 @@ class CylinderFDM:
             #
             # Potential energy matrix
             #
-            data = np.zeros((2*self.V_m_max+1, self.n_r * self.n_z), dtype=complex) # data to hold diagonals
-            for m in range(-self.V_m_max, self.V_m_max+1):
-                m_ind = m + self.V_m_max
-                data[m_ind, :] = self.V_m[m_ind].flatten()
-            #diagonals = np.arange(-self.V_m_max, self.V_m_max+1) * self.n_r * self.n_z
-            diagonals = np.flip(np.arange(-self.V_m_max, self.V_m_max+1)) * self.n_r * self.n_z
-            # duplicate diagonals to account for the fact that the matrix is block diagonal
-            data = np.tile(data, 2*self.n_m+1)
-            #ic(data.shape, diagonals.shape, diagonals)
+            if self.rotation_symmetric_potential:
+                # since the potential is rotation symmetric, it acts as a diagonal matrix
+                # for each m.
+                data = np.tile(self.V.flatten(), self.n_m)
+                ic(data.shape)
+                diagonals = [0]
+                self.H_pot = spdiags(data, diagonals, self.n_dof, self.n_dof)
+            else:
+                V_m = self.V_m # self.fourier_analysis_of_potential(self.V)
+                V_m_max = (len(V_m) - 1) // 2
+                ic(V_m_max)
+                data = np.zeros((2*V_m_max+1, self.n_r * self.n_z), dtype=complex) # data to hold diagonals
+                for m in range(-V_m_max, V_m_max+1):
+                    m_ind = m + V_m_max
+                    m_ind2 = -m + V_m_max
+                    ic(m, m_ind)
+                    data[m_ind, :] = V_m[m_ind2].flatten() 
+                #diagonals = np.arange(-self.V_m_max, self.V_m_max+1) * self.n_r * self.n_z
+                diagonals = np.arange(-V_m_max, V_m_max+1)
+                # * self.n_r * self.n_z
+                #diagonals = np.hstack([diagonals2, diagonals0, diagonals1]) * self.n_r * self.n_z
+                
+                # duplicate diagonals to account for periodicity
+                data = np.vstack([data[0], data, data[-1]])
+                data = np.hstack([data]*self.n_m)
+                diagonals = np.hstack([diagonals[0]+self.n_m, diagonals, diagonals[-1] - self.n_m]) * self.n_r * self.n_z
+                
+                ic(diagonals.shape)
+                ic(data.shape, diagonals.shape, diagonals)
             
             self.H_pot = spdiags(data, diagonals, self.n_dof, self.n_dof)
+            
             return_me += self.H_pot
             
         if potential_td:
-            #
-            # Time-dependent potential energy matrix
-            #
-            data = np.zeros((2*self.D_m_max+1, self.n_r * self.n_z), dtype=complex)
-            for m in range(-self.D_m_max, self.D_m_max+1):
-                m_ind = m + self.D_m_max
-                data[m_ind, :] = self.D_m[m_ind].flatten()
-            diagonals = np.flip(np.arange(-self.D_m_max, self.D_m_max+1)) * self.n_r * self.n_z
-            data = np.tile(data, 2*self.n_m+1)
-            self.H_pot_td = spdiags(data, diagonals, self.n_dof, self.n_dof)
+            raise NotImplementedError("Time-dependent potential not implemented yet.")
             
             
         if kinetic:
@@ -325,8 +451,8 @@ class CylinderFDM:
             
             T_z_kron = kron(identity(self.n_r, format='csr'), self.T_z, format='csr')
             blocks = []
-            for m in range(-self.n_m, self.n_m+1):
-                T_m_kron = kron(self.T_m[np.abs(m)], identity(self.n_z, format='csr'), format='csr')
+            for i_m in range(self.n_m):
+                T_m_kron = kron(self.T_m[i_m], identity(self.n_z, format='csr'), format='csr')
                 blocks.append(T_m_kron + T_z_kron)
                 
             self.H_kin = block_diag(blocks, format='csr')
@@ -339,7 +465,7 @@ class CylinderFDM:
         # Return H_kin + H_tot if td_potential is False
         # Return (H_kin + H_tot,  H_pot_td) if td_potential is True
         if potential_td:
-            return return_me, self.H_pot_td
+            raise NotImplementedError("Time-dependent potential not implemented yet.")
         else:
             return return_me
                
@@ -368,42 +494,93 @@ class CylinderFDM:
         return csr_matrix(H_mat)
 
             
-    def imag_time_prop_ode(self, P):
-        """ TESTING """
-        # P is assumed to have shape (n_dof, n_psi) and to have orthonormal columns
+    # def imag_time_prop_ode(self, P):
+    #     """ TESTING """
+    #     # P is assumed to have shape (n_dof, n_psi) and to have orthonormal columns
         
-        n_psi = P.shape[1]
-        assert(P.shape[0] == self.n_dof)
-        result = np.zeros((self.n_dof, n_psi), dtype=np.complex128)
-        for i in range(n_psi):
-            result[:,i] = self.apply_hamiltonian(P[:,i].reshape(self.shape)).flatten()
+    #     n_psi = P.shape[1]
+    #     assert(P.shape[0] == self.n_dof)
+    #     result = np.zeros((self.n_dof, n_psi), dtype=np.complex128)
+    #     for i in range(n_psi):
+    #         result[:,i] = self.apply_hamiltonian(P[:,i].reshape(self.shape)).flatten()
         
-        H = P.conjugate().T @ result
-        result = result - P @ H
+    #     H = P.conjugate().T @ result
+    #     result = result - P @ H
             
-        return result, np.linalg.eigh(.5*(H + H.T.conjugate()))[0]
+    #     return result, np.linalg.eigh(.5*(H + H.T.conjugate()))[0]
         
         
-    def imag_time_prop(self, psi_list, dt, n_steps):
-        """ TESTING """
+    # def imag_time_prop(self, psi_list, dt, n_steps):
+    #     """ TESTING """
         
-        # psi_list is assumed to have shape (n_dof, n_psi)
+    #     # psi_list is assumed to have shape (n_dof, n_psi)
         
-        # orthogonalize
-        P, R = np.linalg.qr(psi_list)
+    #     # orthogonalize
+    #     P, R = np.linalg.qr(psi_list)
 
-        for i in range(n_steps):    
-            dP, Evals =  self.imag_time_prop_ode(P)
-            ic(np.linalg.norm(dP), np.sum(Evals))
-            P = P + dt * dP
-            P, R = np.linalg.qr(P)
+    #     for i in range(n_steps):    
+    #         dP, Evals =  self.imag_time_prop_ode(P)
+    #         ic(np.linalg.norm(dP), np.sum(Evals))
+    #         P = P + dt * dP
+    #         P, R = np.linalg.qr(P)
         
             
 
-        return P
+    #     return P
+
+
+       
+
 
         
+    def setup_splitting_scheme(self, dt):
+        """Set up the  splitting scheme for the time-dependent Schrödinger equation. """
+        
+        self.dt = dt
+        
+        # Solver for T_z Crank-Nicholson step.
+        self.T_z_lu = splu(csc_matrix(identity(self.n_z) + 0.5j*dt*self.T_z))
+        # Solver for T_rho Crank-Nicholson step.
+        self.T_rho_lu = []
+        for i_m in range(self.n_m):
+            self.T_rho_lu.append(splu(csc_matrix(identity(self.n_r) + 0.5j*dt*self.T_m[i_m])))
 
+
+        
+    def propagate_crank_nicolson(self, psi, t = 0):
+        """Propagate the wavefunction using the Crank-Nicolson method."""
+        
+        dt = self.dt
+        shape = psi.shape
+        assert(shape == self.shape)
+        
+        # First potential step, expoential integration here.
+        if hasattr(self, 'D'):
+            U = self.V + self.modulator(t + 0.25*dt) * self.D
+        else:
+            U = self.V
+        psi = np.fft.fft(np.exp(-0.5j*dt*U) * np.fft.ifft(psi, axis=0), axis=0)
+        
+        # Kinetic step, rho direction
+        for i_m in range(self.n_m):
+            temp = psi[i_m, ...] - 0.5j*dt*self.T_m[i_m] @ psi[i_m, ...]
+            psi[i_m,...] = self.T_rho_lu[i_m].solve(temp)
+            
+        # Kinetic step, z direction
+        for i_m in range(self.n_m):
+            temp = psi[i_m, ...] - 0.5j*dt*psi[i_m, ...] @ self.T_z.T 
+            psi[i_m,...] = self.T_z_lu.solve(temp.T).T
+        
+        # Second potential step.
+        if hasattr(self, 'D'):
+            U = self.V + self.modulator(t + 0.75*dt) * self.D
+        else:
+            U = self.V
+        psi = np.fft.fft(np.exp(-0.5j*dt*U) * np.fft.ifft(psi, axis=0), axis=0)
+        
+                   
+        return psi
+        
 
 
     # def reorder_dimensions(self, psi, order='mzr'):
@@ -437,7 +614,7 @@ class CylinderFDM:
         
 def sample(n, fast = True):
     n_m = 4
-    solver = cylinder_fdm_3d(r_max = 10, z_max = 10, n_r = n, n_z = n , n_m = n_m)
+    solver = CylinderFDM(r_max = 10, z_max = 10, n_r = n, n_z = n , n_m = n_m)
 
     rr, zz = np.meshgrid(solver.r_inner, solver.z_inner, indexing='ij')    
     ic(rr.shape, zz.shape)
