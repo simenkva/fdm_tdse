@@ -179,6 +179,31 @@ class CylinderFDM:
         """Return the meshgrid of the radial and vertical coordinates."""
         return np.meshgrid(self.r_inner, self.z_inner, indexing='ij')
         
+        
+    def reduced_to_full(self, psi_reduced, theta=True):
+        """Convert a reduced wavefunction on the inner grid to a full wavefunction on the total grid.
+        
+        Args:
+            psi_reduced (ndarray): reduced wavefunction of shape (n_m, n_r, n_z)
+            theta (bool): True if the wavefunction is converted tp real space in angular direction, False otherwise.
+        
+        """
+    
+        
+        ans = np.zeros((self.n_m, self.n_r+2, self.n_z+2), dtype = complex)
+        for i_m in range(self.n_m):
+            m = self.m_i[i_m]
+            if m == 0:
+                ans[i_m, :, :] = self.G_r_neumann @ ((self.Rm12 @ psi_reduced[i_m, :, :]) @ self.G_z.T)
+            else:
+                ans[i_m, :, :] = self.G_r_dirichlet @ ((self.Rm12 @ psi_reduced[i_m, :, :]) @ self.G_z.T)
+                
+        if theta:
+            ans = np.fft.ifft(ans, axis=0, norm='ortho')
+            
+        return ans
+    
+    
     def fourier_analysis_of_potential(self, V):
         """ Perform a Fourier analysis of the potential V. """
         
@@ -194,8 +219,8 @@ class CylinderFDM:
         for i in range(self.n_m):
             m = self.m_i[i]
             N = np.linalg.norm(V_FFT[i, :, :])
-            ic(m, N)
-            ic(V_FFT[i, :, :])
+            #ic(m, N)
+            #ic(V_FFT[i, :, :])
             if N > 1e-10 and np.abs(m) > m_max:
                     m_max = np.abs(m)
 
@@ -208,7 +233,7 @@ class CylinderFDM:
         for i in range(self.n_m):
             m = self.m_i[i]
             if np.abs(m) <= m_max:
-                ic(m)
+                #ic(m)
                 m_list.append(m)
                 V_m.append(V_FFT[i, :, :])
         # sort the list in order of increasing m.
@@ -216,8 +241,8 @@ class CylinderFDM:
         m_list = [m_list[i] for i in idx]
         V_m = [V_m[i] for i in idx]
         
-        for i in range(len(V_m)):
-            ic(m_list[i], np.linalg.norm(V_m[i]))
+        #for i in range(len(V_m)):
+        #    ic(m_list[i], np.linalg.norm(V_m[i]))
         
         return V_m
         
@@ -490,7 +515,7 @@ class CylinderFDM:
         where $U(t)$ is a time-dependent potential, and where $T_z$ is the kinetic energy in the z-direction, $T_\rho$ is the kinetic energy in the radial direction
         and which includes the angular momentum terms. We employ a symmetric splitting scheme of local order $O(h^3)$ as follows:
         
-        $$ \psi(t+h) = U_V(t + 3h/4) U_z U_\rho U_V(t+h/4), $$
+        $$ \psi(t+h) = U_V(t + 3h/4) U_z U_\rho U_V(t+h/4)\psi(t), $$
         where 
         $$ U_V(t) e^{-i(h/2)(V + U(t))} $$
         and where 
