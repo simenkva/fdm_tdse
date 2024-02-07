@@ -386,6 +386,24 @@ class CylinderFDM:
         return result
     
 
+    def get_laplacian_fast(self):
+        """ Compute Laplace operator for each m. Returns a list of polar coordinate Laplace operators. 
+        
+        
+        NOTE: This is a simple test implementation that uses homogeneous Dirichlet boundary conditions (excefor at the origin).
+        
+        """
+            
+        T_z_kron = -2*kron(identity(self.n_r, format='csr'), self.T_z, format='csr')
+        blocks = []
+        for i_m in range(self.n_m):
+            T_m_kron = -2*kron(self.T_m[i_m], identity(self.n_z, format='csr'), format='csr')
+            blocks.append(T_m_kron + T_z_kron)
+
+        return blocks            
+
+    
+        
     def get_sparse_matrix_fast(self, kinetic=True, potential=True, potential_td=False):
         """Compute sparse matrix representation of H in a faster way than the
         brute force approach. I have tested that the brute force way and this very
