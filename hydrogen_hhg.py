@@ -5,10 +5,8 @@ from fft_tdse.simulator import LaserPulse
 from erfgau import ErfgauPotential
 from icecream import ic
 from scipy.signal import detrend
-import rich 
 from rich.progress import Progress
-from rich.live import Live
-from rich.table import Table
+
 
 ic.configureOutput(prefix='')
 
@@ -24,17 +22,17 @@ ic.configureOutput(prefix='')
 # Set up grid, potentials, and solver
 # 
 
-n_r = 400
-n_z = 400
+n_r = 1000
+n_z = 1000
 r_max = 320.0
-z_max = 16.0
+z_max = 160.0
 solver = CylinderFDM(r_max, z_max, n_r, n_z, n_m=1)
 tt, rr, zz = solver.get_trz_meshgrid()
 erfgau = ErfgauPotential(mu=1.0)
-omega0 = 0.056
-E0 = 0.06
+omega0 = 0.057
+E0 = 0.03
 t_c = 2*np.pi/omega0
-n_cycles = 6
+n_cycles = 3
 T = n_cycles*t_c
 ic(T)
 laser = LaserPulse(omega=omega0, E0=E0, T=T, t0=0.0)
