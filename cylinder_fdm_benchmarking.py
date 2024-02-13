@@ -17,8 +17,8 @@ from rich.table import Table
 
 def build_harmonic_oscillator(n_r, n_z, n_m, nev=10):
     # Set up solver object    
-    r_max = 20
-    z_max = 20
+    r_max = 10
+    z_max = 10
     solver = CylinderFDM(r_max = r_max, z_max = z_max, n_r = n_r, n_z = n_z, n_m = n_m)
 
     tt, rr, zz = solver.get_trz_meshgrid()
@@ -187,7 +187,9 @@ def propagation_timing_study():
         f.write(console.export_html())
 
 if __name__=="__main__":
+    
     propagation_timing_study()
+    #build_harmonic_oscillator(n_r=999, n_z=1999, n_m=1, nev=10)
         
     
 

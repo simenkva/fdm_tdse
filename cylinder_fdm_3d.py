@@ -3,6 +3,7 @@ import numpy as np
 from polar_fdm_2d import radial_fdm_laplacian
 from scipy.sparse import spdiags, csr_matrix, csc_matrix, lil_matrix, kron, identity, block_diag, bmat
 from scipy.sparse.linalg import LinearOperator, eigsh, expm_multiply, gmres, expm, splu
+from scipy.fft import dst, idst
 import matplotlib.pyplot as plt
 from time import time
 from timeit import timeit
@@ -202,6 +203,16 @@ class CylinderFDM:
             ans = np.fft.ifft(ans, axis=0, norm='ortho')
             
         return ans
+    
+    def m_to_theta(self, psi):
+        """Convert a wavefunction from the m basis to the theta basis."""
+        
+        return np.fft.ifft(psi, axis=0, norm='ortho')
+    
+    def theta_to_m(self, psi):
+        """Convert a wavefunction from the theta basis to the m basis."""
+        
+        return np.fft.fft(psi, axis=0, norm='ortho')
     
     
     def fourier_analysis_of_potential(self, V):
@@ -418,7 +429,70 @@ class CylinderFDM:
         
         return blocks            
 
+    def prepare_poisson_solver(self):
+        """ Prepare for fast Poisson solver. """
+        
+        # Compute the vertical Laplacian eigenvalues
+        # We use the exact eigenvalues of the sine functions,
+        # because there is not reason not to!
+        #k = np.arange(1, self.n_z+1) * np.pi / (2*self.z_max)
+        #dz = self.z[1] - self.z[0]
+        #evals = (2*np.cos(k*dz) - 2)/dz**2
+        z_evals, self.T_z_U = np.linalg.eigh(-2*self.T_z.todense())
+        self.T_z_U = np.asarray(self.T_z_U)
+        z_evals = z_evals.reshape((1, self.n_z))
+        
+        #evals = -k**2
+        #self.T_z_Lambda = evals
+        
+        # Set up DST-I function calls
+        self.dst = lambda u: dst(u, type=1, axis=1)
+        self.idst = lambda u: idst(u, type=1, axis=1)
+
+        # Diagonalize the radial Laplacians.
+        self.T_m_U = []
+        self.D_m_inverse = []
+        for i_m in range(self.n_m):
+            rho_evals, T_m_U = np.linalg.eigh(-2*self.T_m[i_m].todense())
+            self.T_m_U.append(np.asarray(T_m_U))
+            rho_evals = rho_evals.reshape((self.n_r, 1))
+            #self.T_m_Lambda.append(Lambda)
+            #assert(np.allclose(U @ np.diag(Lambda) @ U.T, self.T_m[i_m].todense()))
+            e_r = np.ones((self.n_r, 1))
+            e_z = np.ones((1, self.n_z))
+            D = rho_evals @ e_z + e_r @ z_evals
+            self.D_m_inverse.append( 1.0/D )
+            
+        
+        
+        
+        
+    def solve_poisson(self, f, i_m):
+        """Solve Poisson equation L u = f for u, where L is the Laplacian operator, for
+        a given angular momentum quantum number m, represented by its index i_m.
+        
+        Args:
+            f (ndarray): right-hand side of the Poisson equation.
+            i_m (int): index of the angular momentum quantum number m.
+        """
+
+       
+        # temp = self.T_m_U[i_m].T @ self.dst(f)
+        # ic(type(temp))
+        # ic(temp.shape, self.D_inverse[i_m].shape)
+        # temp = self.D_inverse[i_m] * temp
+        # temp = self.idst(self.T_m_U[i_m] @ temp)
+        
+       
+        temp = self.T_m_U[i_m].T @ f @ self.T_z_U
+        #ic(type(temp))
+        #ic(temp.shape, self.D_inverse[i_m].shape)
+        temp = self.D_m_inverse[i_m] * temp
+        temp = self.T_m_U[i_m] @ temp @ self.T_z_U.T
+        return temp
     
+            
+        
         
     def get_sparse_matrix_fast(self, kinetic=True, potential=True, potential_td=False):
         """Compute sparse matrix representation of H in a faster way than the
@@ -538,6 +612,18 @@ class CylinderFDM:
             self.T_rho_lu.append(splu(csc_matrix(identity(self.n_r) + 0.5j*dt*self.T_m[i_m])))
 
 
+    def compute_ground_state_via_diagonalization(self):
+        """Compute the ground state wavefunction via diagonalization. """
+        
+        if not hasattr(self, 'H_tot'):
+            H = self.get_sparse_matrix_fast(kinetic=True, potential=True, potential_td=False)
+        E, U = eigsh(self.H_tot, k=1, sigma=np.min(self.V))
+        i = np.argsort(E)
+        E = E[i]
+        U = U[:,i]
+        
+        return E[0], U[:,0].reshape(self.shape)
+    
         
     def propagate_crank_nicolson(self, psi, t = 0):
         """Propagate the wavefunction using the Crank-Nicolson method.
