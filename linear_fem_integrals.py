@@ -1,7 +1,8 @@
 import numpy as np 
 import matplotlib.pyplot as plt
 from icecream import ic
-
+from scipy.linalg import eigh 
+    
 # get gauss legendre quadrature rule for interval [a, b] with m points:
 def get_gauss_legendre(a, b, m):
     """Get Gauss-Legendre quadrature rule on [a, b] with m points"""
@@ -76,20 +77,37 @@ def compute_fem_matrices(r_max, n, V_func = lambda r: 0.0):
 
     return S, T, V, r_nodes
 
-def compute_bc_matrices(r_max, n):
+def compute_bc_matrices(r_max, n, left_bc = "neumann", gamma = 1.0, h = 0.0):
     
     # there are n interior grid points
     G = np.zeros((n+2, n))
-    G[0, 0] = 1.0
     G[1:n+1, :] = np.eye(n)
-    G[n+1:] = 0.0
+    #G[n+1:] = 0.0
+    
+    #G = lil_matrix((n + 2, n))
+    if left_bc == "neumann_simple":
+        G[0, 0] = 1.0
+
+    elif left_bc == "neumann":
+        G[0, 0] = 4 / 3
+        G[0, 1] = -1 / 3
+
+    elif left_bc == "robin":
+        G[0, 0] = 2/(h*gamma + 3/2)
+        G[0, 1] = -1 / (2*h*gamma + 3)
+
+    else:
+        G = np.zeros((n+2, n+1))
+        G[:n+1, :n+1] = np.eye(n+1)
+        pass    
     
     return G
     
-    
-def main():
-    V_func = lambda r: -1.0/r #+ 0.5*r*r
-    n = 300
+
+def calculate(n = 10, left_bc = "neumann", gamma = -1.0):
+#    V_func = lambda r: 0.5*r*r
+    V_func = lambda r: -1/r
+
     r_max = 10
     S0, T0, V0, r = compute_fem_matrices(r_max, n, V_func)
     h = r[1] - r[0]
@@ -97,36 +115,75 @@ def main():
     T0 = T0 / h
     V0 = np.diag(np.sum(V0, axis=1)) / h # lump potential matrix
 #    V0 = V0 / h
-    #G = compute_bc_matrices(r_max, n)
-    # S = G.T @ S0 @ G
-    # T = G.T @ T0 @ G
-    # V = G.T @ V0 @ G
+    if left_bc == "neumann":
+        G = compute_bc_matrices(r_max, n, left_bc = "neumann")
+        ic(G.shape, S0.shape, T0.shape, V0.shape)
+        S = G.T @ S0 @ G
+        T = G.T @ T0 @ G
+        V = G.T @ V0 @ G
+        rr = r[1:-1]
+    elif left_bc == "neumann_simple":
+        G = compute_bc_matrices(r_max, n, left_bc = "neumann")
+        ic(G.shape, S0.shape, T0.shape, V0.shape)
+        S = G.T @ S0 @ G
+        T = G.T @ T0 @ G
+        V = G.T @ V0 @ G
+        rr = r[1:-1]
+    elif left_bc == "robin":
+        G = compute_bc_matrices(r_max, n, left_bc = "robin", gamma = gamma, h = h)
+        ic(G.shape, S0.shape, T0.shape, V0.shape)
+        S = G.T @ S0 @ G
+        T = G.T @ T0 @ G
+        V = G.T @ V0 @ G
+        rr = r[1:-1]
+    elif left_bc == "none":
+        G = compute_bc_matrices(r_max, n, left_bc = "none")
+        ic(G.shape, S0.shape, T0.shape, V0.shape)
+        S = G.T @ S0 @ G
+        T = G.T @ T0 @ G
+        V = G.T @ V0 @ G
+        rr = r[:-1]
+    else:
+        raise ValueError("Invalid left_bc")
+        
     
-    # cut away right endpoint
-    S = S0[:-1, :-1]
-    T = T0[:-1, :-1]
-    V = V0[:-1, :-1]
-    
-    ic(r)
-    ic(V_func(r))
-    ic(S)
-    ic(T)
-    ic(np.diag(V)/np.diag(S))
+    # ic(r)
+    # ic(V_func(r))
+    # ic(S)
+    # ic(T)
+    # ic(np.diag(V)/np.diag(S))
 
     
     
-    from scipy.linalg import eigh 
     evals, evecs = eigh(T + V, S)
     print(evals)
     
+    return evals, G @ evecs, r
+
+def main():
+    
+    n = 100
+    evals0, evecs0, r0 = calculate(n = n, left_bc = "none")
+    evals1, evecs1, r1 = calculate(n = n, left_bc = "neumann_simple")
+    evals2, evecs2, r2 = calculate(n = n, left_bc = "neumann")
+    evals3, evecs3, r3 = calculate(n = n, left_bc = "robin", gamma=-2)
+    
+    
+    ic(evals0[0], evals1[0], evals2[0], evals3[0])
+    ic(len(r0), len(r1), len(r2), len(r3))
+    
     plt.figure()
-    plt.plot(r[:-1], evecs[:, 0])
-    plt.plot(r[:-1], evecs[:, 1])
+    plt.plot(r0, evecs0[:, 0], label="none", marker="o")
+    plt.plot(r1, evecs1[:, 0], label="neumann_simple", marker="s")
+    plt.plot(r2, evecs2[:, 0], label="neumann", marker="^")
+    plt.plot(r3, evecs3[:, 0], label="robin", marker="d")
+    plt.legend()
     plt.show()
     
-    # analytical solution
-    E_analytical = -1/(2*(.5-np.arange(1, n+1))**2)
-    ic(E_analytical[:4])
+    # # analytical solution
+    # E_analytical = -1/(2*(.5-np.arange(1, n+1))**2)
+    # ic(E_analytical[:4])
+
         
 if __name__ == "__main__":
     main()
