@@ -1,5 +1,5 @@
 %\documentclass[aps,prl,reprint,groupedaddress,preprint]{revtex4-2}
-\documentclass{article}
+\documentclass[12pt]{article}
 \usepackage[a4paper,margin=2cm]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{tikz}
@@ -8,17 +8,18 @@
 \newcommand{\CC}{\mathbb{C}}
 \newcommand{\pdiff}[2]{\frac{\partial #1}{\partial #2}}
 
+\newcommand{\blockdiag}{\operatorname{blockdiag}}
 
 \begin{document}
 
 % Title, authors, abstract, etc.
 
-\title{Finite Difference Method in Polar Coordinates}
+\title{Finite Difference Method Combined With Parthal Wave Decomposition in Polar Coordinates}
 \author{Simen Kvaal}
 %\affiliation{Hylleraas Centre for Quantum Molecular Sciences, Department of Chemistry, University of Oslo, P.O. Box 1033 Blindern, N-0315 Oslo, Norway}
 
 \begin{abstract}
-This note describes the finite difference method in polar coordinates.
+This note describes the finite difference method in cylinder coordinates.
 \end{abstract}
 
 \maketitle
@@ -27,27 +28,46 @@ This note describes the finite difference method in polar coordinates.
 
 \section{Weak formulation of the Schr\"odinger equation}
 
-We consider the solution of the Schr\"odinger equation for a particle in two dimensions,
+We begin by considering the solution of the Schr\"odinger equation for a particle in $d=2$ dimensions,
 \begin{equation}
     H\psi(\mathbf{r}) = -\frac{1}{2} \nabla^2 \psi + V(\mathbf{r}) \psi(\mathbf{r}) = E \psi(\mathbf{r}),
 \end{equation}
-where $\mathbf{r} \in D = \{ \mathbf{r}| < r_\text{max} \}$, the disk with radius $r_\text{max}$, and where $V(\mathbf{r})$ is assumed to be smooth. It is a well-known fact that any eigenfunction $H$ must possess is then smooth, and that $H$ is self-adjoint over $L^2(D)$ with domain $H^2(D)$. Furthermore, the boundedness of $D$ implies that $H$ has a purely discrete spectrum and a complete set of eigenfunctions.
+where $\mathbf{r} \in D = \{ \mathbf{r}| < r_\text{max} \}$, the disk with radius $r_\text{max}$, and where $V(\mathbf{r})$ is assumed to be smooth away from $\mathbf{r}=0$, and that any possible singularity is sifficiently gentle [state precise condition].
 
-The \emph{weak formulation} passes to a sesquilinear form $h : H^1(D)\times H^1(D) \to \CC$ defined using integration by parts on smooth functions,
+Any eigenfunction $H$ must possess is then smooth away from the singularity, and $H$ is self-adjoint over $L^2(D)$ with domain $H^2(D)$. Furthermore, the boundedness of $D$ implies that $H$ has a purely discrete spectrum and a complete set of eigenfunctions.
+
+
+
+The \emph{weak formulation} integrates the Schrödinger equation against a smooth function $\varphi(\mathbf{r})$ and applies integration by parts to obtain the problem: Find $\psi \in H^2(D)$ such that for all $\varphi \in \mathcal{C}_0^\infty(D)$,
 \begin{equation}
-    h(\phi,\psi) = \frac{1}{2} \int_D \nabla \phi(\mathbf{r}) \cdot \nabla \psi(\mathbf{r}) \; d\mathbf{r} + \int_D V(\mathbf{r}) \phi(\mathbf{r}) \psi(\mathbf{r}) \; d\mathbf{r}.
+    \frac{1}{2} \int_D \overline{\nabla \varphi(\mathbf{r})} \cdot \nabla \psi(\mathbf{r}) \; d\mathbf{r} + \int_D \overline{\varphi(\mathbf{r})} V(\mathbf{r}) \psi(\mathbf{r})  \; d\mathbf{r} = E \int_D \overline{\varphi(\mathbf{r})} \psi(\mathbf{r}) \; d\mathbf{r}.
 \end{equation}
-The eigenvalues of $H$ are now the critical points of the Rayleigh quotient defined by
+The left-hand side defines a sesquilinear form that can be continuously extended uniquely to a function $h : H^1(D)\times H^1(D) \to \CC$,
+\begin{equation}
+    h(\phi,\psi) = \frac{1}{2} \int_D \overline{\nabla \varphi(\mathbf{r})} \cdot \nabla \psi(\mathbf{r}) \; d\mathbf{r} + \int_D \overline{\varphi(\mathbf{r})} V(\mathbf{r}) \psi(\mathbf{r})  \; d\mathbf{r} 
+\end{equation}
+We obtain the weak formulation: Find $\psi \in H^1(D)$ such that for all $\varphi \in H^1(D)$,
+\begin{equation}
+    h(\varphi,\psi) = E \braket{\varphi,\psi}.
+\end{equation}
+The eigenvalues of $H$ are also seen to be the critical points of the Rayleigh quotient defined by
 \begin{equation}
     \mathcal{E}(\psi) = \frac{h(\psi,\psi)}{\braket{\psi,\psi}}.
 \end{equation}
-If we select a family $V_h \subset H^1(D)$ of finite-dimensional subspaces, such that $V_h \to H^1(D)$ as $h\to 0$, then the variational Galerkin approximation is defined by locating the critical points of $\mathcal{E}$ over $V_h$. For any choice $\{\phi_k\}\subset V_h$ of basis functions, this is equivalent to the matrix eigenvalue problem
+
+The benefit of the weak formulation is that we can discretize the problem using a Galerkin method, and that the resulting finite-dimensional eigenvalue problem is well-posed, with well-known convergence properties. Among the standard facts is that the eigenvalues of the finite-dimensional problem converge to the eigenvalues of the continuous problem, and that the eigenfunctions converge in the $H^1(D)$ norm to the eigenfunctions of the continuous problem.
+
+A Galerkin discretization proceeds as follows: Select a family $V_h \subset H^1(D)$ of finite-dimensional subspaces, where $h$ is a discretization parameter, such that $V_h \to H^1(D)$ as $h\to 0$, in the sense that any $\psi \in H^1(D)$ can be sufficiently well approximated by elements of $V_h$ for sufficiently small $h$. The discrete eigenproblem reads: Find $\psi_h \in V_h$ and $E_h \in \RR$ such that for all $\varphi_h \in V_h$,
+\begin{equation}
+    h(\varphi_h,\psi_h) = E_h \braket{\varphi_h,\psi_h}.
+\end{equation}
+By expanding $\psi_h$ and $\varphi_h$ in a basis $\{\phi_k\}$ of $V_h$, we obtain the matrix eigenvalue problem
 \begin{equation}
     \mathsf{H} \mathsf{c} = E_h \mathsf{S} \mathsf{c},
 \end{equation}
 where $\mathsf{H} = \mathsf{H}^H$ has matrix elements $\mathsf{H}_{k,l} = h(\phi_k,\phi_l)$, $\mathsf{S} = \mathsf{S}^H$ has matrix elements $\mathsf{S}_{k,l} = \braket{\phi_k,\phi_l}$, and $\psi_h = \sum_k \mathsf{c}_k \phi_h$ is the approximate eigenfunction.
 
-The eigenvalues of $\mathsf{H}_h$ converge to the eigenvalues of $H$ as $h\to 0$, and the eigenfunctions converge to the eigenfunctions of $H$ in the $H^1(D)$ norm.
+
 
 \section{Polar coordinates}
 
@@ -55,54 +75,80 @@ We introduce polar coordinates $(x,y) = (r\cos\theta,r\sin\theta)$ and the volum
 \begin{equation}
     d\mathbf{r} = r dr d\theta.
 \end{equation}
-The gradient operator in polar coordinates is given by:
+The gradient operator is $\nabla = \partial_x \mathbf{e}_x + \partial_y \mathbf{e}_y$ where in polar coordinates
 \begin{equation}
-    \nabla = \frac{\partial}{\partial r} \hat{\mathbf{r}} + \frac{1}{r} \frac{\partial}{\partial \theta} \hat{\boldsymbol{\theta}}.
+    \partial_x = \cos\theta \partial_r - \frac{1}{r} \sin\theta \partial_\theta, \quad \partial_y = \sin\theta \partial_r + \frac{1}{r} \cos\theta \partial_\theta.
 \end{equation}
-Here, $\hat{\mathbf{r}}$ is the unit vector in the radial direction, and $\hat{\boldsymbol{\theta}}$ is the unit vector in the angular direction. These vectors are orthogonal. As a result, the form $h$ becomes
+From this we deduce the form $h$ in polar coordinates,
 \begin{equation}
-    h(\phi,\psi) = \frac{1}{2} \int_D \pdiff{\phi^*}{r} \pdiff{\psi}{r} + \frac{1}{r^2} \pdiff{\phi^*}{\theta} \pdiff{\psi}{\theta} + V \phi^* \psi  \; r \, dr \, d\theta. \label{eq:form-polar}
+    h(\varphi,\psi) = \frac{1}{2} \int_D \left( \pdiff{\varphi^*}{r} \pdiff{\psi}{r} + \frac{1}{r^2} \pdiff{\varphi^*}{\theta} \pdiff{\psi}{\theta} \right) r \, dr\, d\theta + \int_D V \varphi^* \psi \; r \, dr \, d\theta. 
+    \label{eq:form-polar0}
 \end{equation}
+Here,
+\begin{equation}
+    \int_D = \int_0^{r_\text{max}} \int_0^{2\pi}.
+\end{equation}
+
+
 We note that the Laplace--Beltrami operator in polar coordinates is
 \begin{equation}
   \nabla^2 =
 \frac{1}{r} \frac{\partial}{\partial r} \left( r \frac{\partial}{\partial r} \right) + \frac{1}{r^2} \frac{\partial^2}{\partial\theta^2},
 \end{equation}
-and that Eq.~\eqref{eq:form-polar} can be obtained using this formula and integration by parts. In particular, the Schrödinger equation on strong form in polar coordinates is
+and that Eq.~\eqref{eq:form-polar0} can alternatively be obtained using this formula and integration by parts. In particular, the Schrödinger equation on strong form in polar coordinates is
 \begin{equation}
     -\frac{1}{2} \left( \frac{1}{r} \frac{\partial}{\partial r} \left( r \frac{\partial}{\partial r} \right) - \frac{1}{r^2} \frac{\partial^2}{\partial\theta^2} \right) \psi + V \psi = E \psi.
 \end{equation}
 
-The next step is to introduce a Fourier expansion in the angular direction,
+\subsection{Partial wave decomposition}
+
+As function of $\theta$, $\psi(r,\theta)$ is periodic and smooth, at least away from $r=0$. Thus, it is convenient to expand $\psi(r,\theta)$ in a Fourier series,
 \begin{equation}
-    \psi(r,\theta) = \sum_{m=-\infty}^\infty e^{im\theta} \psi_m(r).
+    \psi(r,\theta) = \sum_{m=-\infty}^\infty \frac{e^{im\theta}}{\sqrt{2\pi}} \psi_m(r).
 \end{equation}
-Since $\psi$ is assumed smooth, the Fourier coefficients $\psi_m(r)$ are smooth functions of $r$, and at the coordinate singularity $r=0$, we have the boundary condition $\psi_0'(0) = 0$ and $\psi_m(0) = 0$ for $m\neq 0$. The radial functions $\psi_m(r)$ are
-elements of $L^2([0, r_\text{max}], r dr)$, on which the inner product is
+Since $\psi$ is assumed smooth for $r>0$, the Fourier coefficients $\psi_m(r)$ are smooth functions of $r$, and at the coordinate singularity $r=0$ we may give a variety of behavioral boundary conditions. (For $V$ that are also smooth at $r=0$, we have the boundary condition $\psi_0'(0) = 0$ and $\psi_m(0) = 0$ for $m\neq 0$. For 2d Coulomb, we have a Robin condition. In any case, the eigenfunction is in $H^1(D)$.)
+
+We benefit from an abstract characterization of $H^1(D)$, defined in cartesian coordinates, in terms of spaces defined over the radial coordinate and the angular qunatum number $m$. This will be as follows: $\psi \in H^1(D)$ if and only if the partial wave coefficients $\psi_m(r)$ are in $H^1([0,r_\text{max}];r dr)$ for all $m$, and the norm $\|\psi\|_{H^1(D)}$ is finite, given by
+\begin{equation}
+    \|\psi\|_{H^1(D)}^2 = \sum_{m=-\infty}^\infty \|\psi_m\|_{H^{1,m}([0,r_\text{max}];r dr)}^2.
+\end{equation}
+The radial Sobolev space $H^{1,m}([0,r_\text{max}];r dr)$ is defined as the space of functions $u(r)$ such that $u(r) \in L^2([0,r_\text{max}], r dr)$ and $u'(r) \in L^2([0,r_\text{max}], r dr)$, and $m u(r)/r \in L^2([0,r_\text{max}], r dr)$, where the weighted Hilbert space $L^2([0,r_\text{max}], r dr)$ is defined by the inner product
 \begin{equation}
     \braket{u,v}_r = \int_0^{r_\text{max}} u(r)^* v(r)\;  r dr.
 \end{equation}
-Similarly, the potential $V(r,\theta)$ is expanded as
+We note that for all $m\neq 0$ the Sobolev spaces are identical, but for $m=0$ the condition $u(r)/r \in L^2([0,r_\text{max}], r dr)$ is not used.
+
+The total Sobolev space is seen to be a direct sum of the spaces $H^1([0,r_\text{max}];r dr)$.
+
+In order to make the potential $V$ convenient in this coordinate system, we expand it in a Fourier series as well,
+(note the absence of the $1/\sqrt{2\pi}$ factor)
 \begin{equation}
     V(r,\theta) = \sum_{m=-\infty}^\infty e^{im\theta} V_m(r).
 \end{equation}
-The boundary conditions at $r=0$ are the same for $V_m$ as for $\psi_m$.
+Inserting these Fourier expansions into the form $h$ we obtain
+\begin{equation}
+    \begin{split}
+    h(\varphi,\psi) &= \frac{1}{2} \int_D \left( \pdiff{\varphi^*}{r} \pdiff{\psi}{r} + \frac{1}{r^2} \pdiff{\varphi^*}{\theta} \pdiff{\psi}{\theta} \right) r \, dr\, d\theta + \int_D V \varphi^* \psi \; r \, dr \, d\theta \\
+    &= \sum_m \frac{1}{2}  \int_0^{r_\text{max}} \pdiff{\varphi_m^*}{r} \pdiff{\psi_m}{r} + \frac{m^2}{r^2} \varphi_m^*(r) \psi_m(r)  r \, dr + \sum_{m,m'} \int_0^{r_\text{max}} \varphi_m(r)^* V_{m-m'}(r) \psi_{m'} \; r \, dr.
+    \end{split}
+\end{equation}
 
 
-Inserting the Fourier expansions into the Schr\"odinger equation, we obtain
-\begin{equation}
- H\psi = \sum_m e^{im\theta}\left[  
-        -\frac{1}{2} \left( \frac{1}{r} \frac{\partial}{\partial r} \left( r \frac{\partial}{\partial r} \right) + \frac{m^2}{2r^2} \right)
-        \right]\psi_m(t) + \sum_{m,m'} e^{i(m+m')\theta} V_{m'}(r) \psi_{m}(r) .
-\end{equation}
-Fourier decomposing $H\psi = \sum_m e^{i m\theta} (H\psi)_m$ and integrating against $e^{-im\theta}$ gives
-\begin{equation}
-    (H\psi)_m = T_m \psi_m(t) + \sum_{m'} V_{m-m'}(r) \psi_{m'}(r) .
-\end{equation}
-where
+We define the radial kinetic energy operator $T_m$ as
 \begin{equation}
  T_m = -\frac{1}{2} \frac{1}{r} \frac{\partial}{\partial r} \left( r \frac{\partial}{\partial r} \right) + \frac{m^2}{2r^2} .
 \end{equation}
+The associated form is
+\begin{equation}
+    t_m(\phi,\psi) = \frac{1}{2} \braket{\partial_r \phi, \partial_r \psi}_r + \frac{m^2}{2} \braket{\phi,r^{-2}\psi}_r.
+\end{equation}
+and the inner product on $H^{1,m}([0,r_\text{max}];r dr)$ can be taken to be
+\begin{equation}
+    \braket{u,v}_{H^{1,m}} = \braket{u,v}_r + t_m(u,v).
+\end{equation}
+(This is slightly non-conventional; the conventional inner product would have a factor $2$ in front of the second term.)
+
+
 The sesquilinear form $h$ becomes
 \begin{equation}
     \begin{split}
@@ -112,27 +158,38 @@ The sesquilinear form $h$ becomes
     \end{split}
 \end{equation}
 
-It is useful for later reference to do the integration by parts transition from $T_0$ to the form $t_0$ defined by the first term of Eq.~\eqref{eq:form-polar}. This gives:
-\begin{equation}
--2\braket{u,T_0v}_r =  \braket{u, (r^{-1}\partial_r r\partial r) v}_r = \int u^*(r) \partial_r (r \partial_r v) \; dr = 
-    \left[ u^*(r) \partial_r v(r) r  \right]_0^\infty - \int \partial_r u^*(r) \partial_r v(r) r \; dr.
-\end{equation}
-The boundary terms vanish if $u$ and $v$ are sufficiently regular. We therefore obtain the
-sesquilinear form
-\begin{equation}
-    t_0(u,v) = \frac{1}{2}\braket{ \partial_r u, \partial_r v}_r.
-\end{equation}
+% It is useful for later reference to do the integration by parts transition from $T_0$ to the form $t_0$ defined by the first term of Eq.~\eqref{eq:form-polar}. This gives:
+% \begin{equation}
+% -2\braket{u,T_0v}_r =  \braket{u, (r^{-1}\partial_r r\partial r) v}_r = \int u^*(r) \partial_r (r \partial_r v) \; dr = 
+%     \left[ u^*(r) \partial_r v(r) r  \right]_0^\infty - \int \partial_r u^*(r) \partial_r v(r) r \; dr.
+% \end{equation}
+% The boundary terms vanish if $u$ and $v$ are sufficiently regular. We therefore obtain the
+% sesquilinear form
+% \begin{equation}
+%     t_0(u,v) = \frac{1}{2}\braket{ \partial_r u, \partial_r v}_r.
+% \end{equation}
 
-The form $h$ is bounded and coercive on the domain $H^1(\RR^2)$ of $h$,
-\begin{equation}
-    |h(\phi,\psi)| \leq C \|\phi\|_{H^1(D)} \|\psi\|_{H^1(D)}, \qquad h(\phi,\phi) \geq c \|\phi\|_{H^1(D)}^2.
-\end{equation}
+
 
 \section{Finite element method}
 
-We introduce linear finite elements in the radial coordinate: we  divide $[0, r_\text{max}]$ into $n+1$ uniform intervals of length $h = r_\text{max}/(n+1)$. The nodes of the grid are thus $r_k = kh$ for $k=0,1,\ldots,n+1$, in total $n+2$ points. We will enforce (discrete) boundary conditions at $r=0$ and $r=r_\text{max}$, so that the total number of degrees of freedom for a radial wavefunction is $n$.
+\subsection{Variational formulation in polar coordinates}
 
-We introduce the space of piecewise linear and continuous functions $V_h$ over $[0, r_\text{max}]$. These functions are weakly differentiable, with derivatives that are constant over the intervals. Thus, $V_h \subset H^1([0,r_\text{max}];r dr)$. The space of derivatives is denoted $W_h \subset L^2([0,r_\text{max}]; r dr)$.
+Let $V_m = H^{1,m}([0,r_\text{max}];r dr)$, and let $V = \bigoplus_m V_m$, which is isometrically isomorphic to $H^1(D)$. A flexible variational framework consists of choosing a family of finite-dimensional subspaces $V_{m,h} \subset V_{m}$, define $V_h = \bigoplus_m V_{m,h}$, and assume that $V_{m,n}$ is such that $V_h \to V$ as $h\to 0$ (i.e., that the unuion of all the $V_h$ is dense in $V$.) Thus each partial wave space $V_{m,h}$ is independent of the others. However, the potential term necessitates computing inner products of the form $\braket{\phi_m, V_{m-m'} \psi_{m'}}_r$, and thus the spaces $V_{m,h}$ must be chosen to be such that these inner products between functions in different spaces are easily computed.
+
+A solution is found by observing that $V_m \subset V_0$ for all $m\neq 0$, the difference in the spaces being the boundary condition at $r=0$ tue to the centrifugal term. Thus, $V_0$ is the ``main'' space to consider. We correspondingly choose a family of subspaces $V_{0,h} \to V_0$, and define $V_{m,h} \subset V_{0,h}$ as the subspace that satisfies the proper boundary condition. The potential energy form is the easily computed.
+
+In the next section, we introduce piecewise linear finite element spaces for the radial coordinate.
+
+
+
+\subsection{Piecewise linear radial finite elements}
+
+We introduce linear finite elements in the radial coordinate: we  divide $[0, r_\text{max}]$ into $n+1$ uniform intervals of length $h = r_\text{max}/(n+1)$. The nodes of the grid are thus $r_k = kh$ for $k=0,1,\ldots,n+1$, in total $n+2$ points. 
+
+%We will enforce homogenous Dirichlet boundary conditions at $r=r_\text{max}$, so that the total number of degrees of freedom for a radial wavefunction is $n+1$. \emph{Since our basis functions live in $H^1}
+
+We introduce the space of piecewise linear and continuous functions $V_h$ over $[0, r_\text{max}]$. These functions are weakly differentiable, with derivatives that are constant over the intervals. Thus, $V_h \subset H^{1,0}([0,r_\text{max}];r dr)$. The space of derivatives is denoted $W_h \subset L^2([0,r_\text{max}]; r dr)$.
 
 A basis for $V_h$ is given by the hat functions $u_k$, for $k=0,1,\ldots,n+1$, defined by
 \begin{equation}
@@ -142,15 +199,35 @@ A basis for $V_h$ is given by the hat functions $u_k$, for $k=0,1,\ldots,n+1$, d
         0 & \text{otherwise}.
     \end{cases}
 \end{equation}
-See~\ref{fig:fem-basis} for an illustration.
-We note that $k=0$ and $k=n+1$ are special, in that the functions $u_0$ and $u_{n+1}$ are nonzero only on the interval $[0,h]$ and $[r_\text{max}-h,r_\text{max}]$, respectively, and does not have the hat shape.
+See Figure~\ref{fig:fem-basis} for an illustration.
+We note that $k=0$ and $k=n+1$ are special, in that the functions $u_0$ and $u_{n+1}$ are nonzero only on the interval $[0,h]$ and $[r_\text{max}-h,r_\text{max}]$, respectively, and do not have the hat shape.
 
 
-The functions satisfy $u_k(r_j) = \delta_{k,j}$, and we note that the exact derivative of $u_k$ is given by the forward difference formula: For $x \in [x_k, x_{k+1}]$, we have $u'_k(x) = h^{-1} (u_{k+1}(x) - u_k(x))$.
+The functions satisfy $u_k(r_j) = \delta_{k,j}$, and we note that the exact derivative of $u_k$ is given by the forward difference formula: For $x \in [x_k, x_{k+1}]$, we have $u'_k(x) = h^{-1} (u_{k+1}(x) - u_k(x))$. For $x \in [x_{k-1}, x_k]$, we have $u'_k(x) = -h^{-1} (u_{k}(x) - u_{k-1}(x))$.
 
-The finite element method is now completed by evaluating the form $h$ on the basis functions $u_k$ and $u_l$, yielding $\mathsf{H}_{k,l}$, as well as the overlap matrix $\mathsf{S}_{k,l} = \braket{u_k,u_l}_r$. 
+The hat functions satisfy $u_k \in H^{1,m}([0,r_\text{max}];r dr)$ for $k>0$ and all $m$, and $u_k \in H^{1, 0}([0,r_text{max}]; r dr)$ as well. At the right boundary, we require homogenous Dirichlet boundary conditions. Thus, we define discrete spaced for each value of $m$,
+\begin{equation}
+    V_{h,m} = \begin{cases} \text{span}\{ u_k \, | \, k=1,\ldots,n \} & m \neq 0, \\ \text{span}\{ u_k \, | \, k=0,\ldots,n \} & m = 0. \end{cases}
+\end{equation}
+We also need to introduce a cutoff for the angular momentum, $m_\text{max}$, which we assume to be an even integer for simplicity. We obtain the space $V_h$ as a direct sum of the spaces $V_h^m$, for $-m_\text{max}/2 \leq m < m_\text{max}/2$, and a discrete wavefunction $\psi_h$ reads
+\begin{equation}
+    \psi_h(r,\theta) = \sum_{m=-m_\text{max}/2}^{m_\text{max}/2-1} \frac{e^{im\theta}}{\sqrt{2\pi}}\psi_{h,m}(r), \quad \psi_{h,m} \in V_{h,m}.
+\end{equation}
+We observe the discrete basis functions
+\begin{equation}
+    \phi_{k,m}(r) = \frac{e^{im\theta}}{\sqrt{2\pi}} u_k(r), \quad k=1-\delta_{m,0},\ldots,n, \quad m = -m_\text{max}/2,\ldots,m_\text{max}/2-1
+\end{equation}
 
-The kinetic energy terms and overlap integrals are obtained by analytic integration, since the basis functions are piecewise linear. The potential energy terms are obtained by numerical integration. 
+
+Let us now focus on the terms in the form $h$ that arises for a given fixed $m$, since the only coupling between different $m$ values is the potential term, and for rotationally symmetric potentials, no such coupling exists.
+
+The overlap matrix $\mathsf{S}_{j,l}$ (arising from the $L^2$ inner product) is obtained by analytic integration, as the integrand is a piecewise polynomial of degree 3. Alternatively, we can use Gauss-Legendre quadrature with at least 2 quadrature points. The kinetic energy form is also obtained by analytical integration, even for $m\neq 0$.
+
+The potential energy form must in general be obtained by numerical integration, except for in special cases, where analytical integration can be done. We also note that the off-diagonal parts
+
+
+
+We now have assembled the matrices $\mathsf{H}^m$, $\mathsf{S}^m$, and $\mathsf{V}^{m,m'}$ for each $m$ and $m'$. The matrix $\mathsf{H}^m$ is the kinetic energy matrix, and the matrix $\mathsf{V}^{m,m'}$ is the potential energy matrix. The matrix $\mathsf{S}^m$ is the overlap matrix. The eigenvalue problem for each $m$ is then
 
 We will enforce homogenous Dirichlet BCs at the right endpoint homogenous Neumann conditions at the left endpoint for $m=0$, and homogenous Dirichlet conditions otherwise. In both cases, the basis function $u_0$ is eliminated, resulting in a modified basis of $n$ functions $\tilde{u}_k$, where we choose to start numbering at $k=1$. The elimination produces a matrix $\mathsf{G} \in \RR^{n+2,n}$ such that
 \begin{equation}
@@ -223,13 +300,19 @@ In the next section we prove that the kinetic energy matrix is identical to the 
         
         \newcommand{\K}{4}
         \draw[thick] (0,0) -- (\K-1,0) -- (\K,1.0) -- (\K+1,0) -- (\N,0);
+        \node at (4,1) [right] {$u_4$};
+
+        \draw[thick] (0,1) -- (1,0);
+        \draw[thick] (7,0) -- (8,1);
+        \node at (0,1) [right] {$u_0$};
+        \node at (8,1) [left] {$u_8$};
              
 
         % Axis arrow
         \draw[->] (-0.3,0) -- (\N+1.3,0) node[right] {$r$};
 
     \end{tikzpicture}
-    \caption{Finite element method hat function. The value at the peak is $1$.}
+    \caption{Finite element method hat function. Special cases at boundaries shown. The value at the peak is $1$.}
     \label{fig:fem-basis}
 \end{figure}
 
@@ -338,6 +421,158 @@ For $k=n+1$, only the first integral contributes, and we get
     \mathsf{S}_{n+1,n+1} = \frac{1}{4} h^2 + \frac{1}{3} (r_\text{max}-h) h
  = \frac{1}{4} h^2 + \frac{1}{3} r_\text{max} h - \frac{1}{3} h^2 = \frac{1}{3} r_\text{max} h + \frac{1}{12} h^2.
 \end{equation}
+
+
+\section{Time-dependent Hartree--Fock on a grid}
+
+In this section, we consider the task of propagating the Hartree--Fock state when the orbitals are defined on a grid.
+
+The contiuous  RHF Fock operator is a \emph{linear operator} that \emph{depends on the occupied orbitals $\varphi_i$}. The action on an arbitrary $\psi$ is
+\begin{equation}
+    \hat{f} \psi = \hat{h} \psi +  \left( 2 \hat{j} - \hat{k} \right) \psi,
+\end{equation}
+where
+\begin{equation}
+    \hat{h} = -\frac{1}{2} \nabla^2 - V(r),
+\end{equation}
+with $V(r)$ the nuclear potential, and
+where the Hartree potential $\hat{j}$ is 
+\begin{equation}
+    [\hat{j} \psi](r) = \psi(r) \sum_j \int \frac{\varphi_j^*(r') \varphi_j(r')}{|r-r'|} \; dr,
+\end{equation}
+and the exchange potential $\hat{k}$ is
+\begin{equation}
+    [\hat{k} \psi](r) = \sum_j \varphi_j(r) \int \frac{\varphi_j^*(r') \psi(r')}{|r-r'|} \; dr.
+\end{equation}
+We now introduce a discretization, which we generically assume is of collocation type: $\psi(r)$ are the pointwise values on of a wavefunction on a set of nodes, and $\hat{h}$ correspondingly interpreted as mapping from grid values to grid values as well. The Hartree and exchange potentials become diagonal operators, and we introduce some approximation $\hat{W}$ that takes a discrete density and returns a discrete potential, 
+\begin{equation}
+    \hat{W}[\rho](r) \approx \int \frac{\rho(r')}{|r-r'|} \; dr.
+\end{equation}
+This is then a discrete solution of the Poisson equation $\nabla^2 \hat{W}[\rho] = -4 \pi \rho$ with proper boundary conditions.
+
+We now get the discrete Fock operator,
+\begin{equation}
+    \hat{f} \psi = \hat{h} \psi +  \left( 2 \hat{W}[\sum_j \varphi_j\varphi_j^*] - \sum_j \hat{W}[\psi \varphi_j^*] \right) \psi,
+\end{equation}
+where the sum is over the occupied orbitals. The time-dependent Hartree--Fock equation is then
+\begin{equation}
+    i \partial_t \varphi_j = \hat{f} \varphi_j,
+\end{equation}
+which is to hold for all occupied orbitals $\varphi_j$.
+
+In HF theory the unknown is a vector of orbitals, and the Fock operator is a block operator acting on this vector. We will now derive the form of the Fock operator in the grid representation.
+
+We introduce a compound wavefunction $\Phi = (\varphi_1,\ldots,\varphi_n)$, where we imagine each orbital as a vector, and $\Phi$ being these vectors stacked on top of each other. Thus, if we have $M$ orbitals, and each orbital is of dimension $n$, then $\Psi$ consists of $M$ blocks of length $n$. the operators that we will consider acting on $\Phi$ are then block matrices. The vector $\Phi$ is one particular element, consisting of the actual orbitals, of the compound vector space. We will denote a genera element of this vector space as $\Psi$, and its components are \emph{not} necessarily the orbitals,
+\begin{equation}
+    \Psi = (\psi_1,\ldots,\psi_M).
+\end{equation}
+We introduce a projection operator $P_j$ that projects onto the $j$th component,
+\begin{equation}
+    P_j \Psi = \psi_j.
+\end{equation}
+The formal adjoint of this operator takes an orbital and inserts in into a compound wavefunction,
+\begin{equation}
+    P_i^\dag \psi = (0_{j=0}, \ldots, 0_{j=i-1}, \psi, 0_{j=i+1},\ldots, 0_{M}).
+\end{equation}
+For any single-orbital operator $\hat{a}$ we note that $P_i^\dag \hat{a} P_j$ is a block matrix being all zero except for the block located at position $ij$ which becomes $\hat{a}$.
+
+We wish to identify the nonlinear block operator $\hat{F}$ acting on $\Psi$, which must satisfy
+\begin{equation}
+    \hat{F} \Psi = \sum_i P_i^\dag \hat{f} P_i \Psi.
+\end{equation}
+The linear parts of $\hat{F}$ will be unique, while the nonlinear parts can be written in a variety of ways, as we will see.
+
+Let us first consider the block operator corresponding to $\hat{h}$. We get
+\begin{equation}
+    \hat{H} = \sum_i P_i^\dag \hat{h} P_i = \blockdiag(\hat{h},\ldots,\hat{h}),
+\end{equation}
+where the right hand side is a block diagonal matrix with diagonal blocks equal to $\hat{h}$.
+
+We next consider the Hartree potential terms: 
+\begin{equation}
+    \hat{j} P_i \Psi = \sum_j \hat{W}[\varphi_j \varphi_j^*] P_j\Psi = \sum_j \hat{W}[(P_j \Phi) (P_j\Phi)^*] P_i \Psi.
+\end{equation}
+Thus,
+\begin{equation}
+    \hat{J} = \sum_{ij} P_i^\dag \hat{W}[(P_j \Phi) (P_j\Phi)^*]  P_i.
+\end{equation}
+Similarly,
+\begin{equation}
+    \hat{k} P_i \Psi = \sum_j \hat{W}[(P_i\Psi) \varphi_j^*] \varphi_j = \sum_j \hat{W}[(P_i \Psi) (P_j\Phi)^*] P_i \Phi.
+\end{equation}
+Thus,
+\begin{equation}
+    \hat{K} = \sum_{ij} P_i^\dag \hat{W}[(P_i \; \cdot\; ) (P_j\Phi)^*]  P_j\Phi.
+\end{equation}
+We get for the total Fock operator
+\begin{equation}
+    \hat{F}(\Phi) = \hat{H} + 2 \sum_{ij} P_i^\dag \hat{W}[(P_j \Phi) (P_j\Phi)^*]  P_i - \sum_{ij} P_i^\dag \hat{W}[(P_i \; \cdot\; ) (P_j\Phi)^*]  P_j \Phi.
+\end{equation}
+We recall that $\hat{f}$ is a linear operator that depends on the RHF orbitals. Similarly, $\hat{F}(\Phi)$ is still a linear operator that depdends on $\Phi$. We now apply $\hat{F}(\Phi)$ to $\Phi$ in particular and observe something interesting:
+\begin{equation}
+    \hat{F}(\Phi) \Phi = \hat{H} \Phi + 2 \sum_{ij} P_i^\dag \hat{W}[(P_j \Phi) (P_j\Phi)^*]  P_i \Phi - \sum_{ij} P_i^\dag \hat{W}[(P_i \Phi ) (P_j\Phi)^*]  P_j\Phi.
+\end{equation}
+From this, we can extract a \emph{different} nonlinear operator $\hat{F}'(\Phi)$:
+\begin{equation}
+    \hat{F}'(\Phi) = \hat{H} + 2 \sum_{ij} P_i^\dag \hat{W}[(P_j \Phi) (P_j\Phi)^*]  P_i - \sum_{ij} P_i^\dag \hat{W}[(P_i \Phi ) (P_j\Phi)^*]  P_j.
+\end{equation}
+This operator is such that 
+\begin{equation}
+    \hat{F}'(\Phi) \Phi = \hat{F}(\Phi) \Phi,
+\end{equation}
+but in general we have
+\begin{equation}
+    \hat{F}'(\Phi) \Psi \neq \hat{F}(\Phi) \Psi.
+\end{equation}
+So as linear operators they are actually different. The point is that in $\hat{F}'$ we isolate the nonlinearity completely inside the mean-field operators $\hat{W}$.
+
+We now consider the time-dependent Hartree--Fock equation. We have
+\begin{equation}
+    i \partial_t \varphi_j = \hat{f}(\varphi_1,\cdots,\varphi_M) \varphi_j,
+\end{equation}
+This translates to
+\begin{equation}
+    i \partial_t \Phi = \hat{F}(\Phi) \Phi = \hat{F}'(\Phi)\Phi.
+\end{equation}
+We can now define a constant mean-field (CMF) class of methods: Over an interval $[t, t+\Delta t]$ we approximate the time-dependent $\Phi(t+s) = \bar{\Phi}(t)$ \emph{inside the mean-field terms}. Over the time interval we thus have,
+\begin{equation}
+    i \partial_t \Phi = \hat{F}'(\bar{\Phi}) \Phi.
+\end{equation}
+This is a linear equation. However, whereas $\hat{H}$ and $\hat{J}$ are block diagonal, the total $F'(\bar{\Phi})$ is not. Indeed, we see that the blocks of $\hat{F}'(\bar{\Phi})$ are given by 
+\begin{equation}
+    \hat{F}'_{ij}(\bar{\Phi}) = \delta_{ij} \left(\hat{h} + 2 \hat{W}[(\sum_k P_j \bar{\Phi}) (P_j\bar{\Phi})^*] \right) -  \hat{W}[(P_i \bar{\Phi} ) (P_j\bar{\Phi})^*] .
+\end{equation}
+Thus, the linear operator $\hat{F}'(\bar{\Phi})$ couples the different blocks of $\Phi$. However, the off-diagonal blocks are all diagonal operators, and the diagonal blocks are 
+\begin{equation}
+    \hat{h}_{\text{eff}} = \hat{t} + \hat{v} + \hat{v}_J,
+\end{equation}
+with $\hat{v}_J = \hat{W}[\sum_j |\bar{\varphi}_j|^2]$ being a potential.
+
+I suggest to do a splitting scheme: We write the propagator from $t$ to $t + \Delta t$ as
+\begin{equation}
+    \begin{split}
+    \mathcal{U} &= \exp[-i\Delta t \hat{F}'(\bar{\Phi})] = \exp[ -i \Delta t (\hat{H}_\text{eff} - \hat{K}'(\bar{\Phi}))] \\ &= \exp[i\Delta t \hat{K}'(\bar{\Phi})/2] \exp[-i\Delta t \hat{H}_\text{eff}] \exp[i\Delta t \hat{K}'(\bar{\Phi})/2] + \mathcal{O}(\Delta t^3).
+    \end{split}
+\end{equation}
+Since $\hat{H}_\text{eff}$ is block diagonal,
+\begin{equation}
+    \exp[-i\Delta t \hat{H}_\text{eff}] = \blockdiag(\exp[-i\Delta t \hat{h}_\text{eff}],\ldots,\exp[-i\Delta t \hat{h}_\text{eff}]),
+\end{equation}
+that is, each block is a propagator for a single orbital with a modified potential.
+
+The operator $\hat{K}'(\bar{\Phi})$ is a block operator, and its exponential is equivalent to solving the TDSE
+\begin{equation}
+    i \partial_t \Phi = -\hat{K}'(\bar{\Phi}) \Phi,
+\end{equation}
+over a time interval of length $\Delta t$. We observe that the ``Hamiltonian'' here is just the exchange potential, a diagonal matrix with eigeenvalues whose absolute values are bounded by the values of the exchange potential elements. In particular, these eigenvalues are \emph{bounded uniformly} as our discretization becomes finer. \emph{Explicit RK methods can be used to solve this equation.} We also note that the action of $\hat{K}'(\bar{\Phi})$ on a vector $\Psi$ is rather efficient, as the blocks are diagonal. Selecting an RK method for this, we can use plain RK4, but this is slightly more costly than needed. We can also use, say, the classical third order scheme got $y' = f(t,y)$:
+\begin{enumerate}
+\item Calculate \(k_1 = f(t_n, y_n)\).
+\item Calculate \(k_2 = f\left(t_n + \frac{1}{2}\Delta t, y_n + \frac{1}{2}\Delta t k_1\right)\).
+\item Calculate \(k_3 = f(t_n + \Delta t, y_n - \Delta t k_1 + 2\Delta t k_2)\).
+\item Update \(y_{n+1} = y_n + \frac{\Delta t}{6}(k_1 + 4k_2 + k_3)\).
+\end{enumerate}
+
+
 
 
 \end{document}
