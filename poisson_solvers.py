@@ -50,3 +50,138 @@ class PoissonSpherical:
         b = -f
         b[-1] += w_rmax / self.dr**2
         return sp.linalg.solveh_banded(-self.A[l], b, lower=True)
+
+
+class PoissonCylindrical:
+    def __init__(self, Laplacian, rho, z, m=0):
+        ########################################
+        self.Laplacian = Laplacian
+        self.rho = rho
+        self.z = z
+        self.drho = rho[1] - rho[0]
+        self.dz = z[1] - z[0]
+        self.rho_inner = rho[1:-1]
+        self.z_inner = z[1:-1]
+        self.n_rho = len(self.rho_inner)
+        self.n_z = len(self.z_inner)
+        self.m = m
+        #########################################
+        g = np.zeros((self.n_rho + 2, self.n_z + 2))
+        for i in range(1, self.n_rho + 2):
+            g[i, 0] = np.sqrt(2 * np.pi * rho[i] / (rho[i] ** 2 + z[0] ** 2))
+            g[i, self.n_z + 1] = np.sqrt(
+                2 * np.pi * rho[i] / (rho[i] ** 2 + z[self.n_z + 1] ** 2)
+            )
+
+        for j in range(self.n_z + 2):
+            g[self.n_rho + 1, j] = np.sqrt(
+                2
+                * np.pi
+                * rho[self.n_rho + 1]
+                / (rho[self.n_rho + 1] ** 2 + z[j] ** 2)
+            )
+        inhomogenous_dirichlet_boundary = np.zeros(
+            (self.n_rho + 2, self.n_z + 2)
+        )
+
+        for j in range(1, self.n_z + 1):
+            inhomogenous_dirichlet_boundary[self.n_rho, j] = (
+                -g[self.n_rho + 1, j]
+                * (rho[self.n_rho + 1] + self.drho / 2)
+                / (
+                    np.sqrt(rho[self.n_rho] * rho[self.n_rho + 1])
+                    * self.drho**2
+                )
+            )
+            if j == self.n_z:
+                inhomogenous_dirichlet_boundary[self.n_rho, self.n_z] -= (
+                    g[self.n_rho, j + 1] / self.dz**2
+                )
+            if j == 1:
+                inhomogenous_dirichlet_boundary[self.n_rho, 1] -= (
+                    g[self.n_rho, j - 1] / self.dz**2
+                )
+
+        for i in range(1, self.n_rho):
+            inhomogenous_dirichlet_boundary[i, 1] = -g[i, 0] / self.dz**2
+            inhomogenous_dirichlet_boundary[i, self.n_z] = (
+                -g[i, self.n_z + 1] / self.dz**2
+            )
+
+        self.inhomogenous_dirichlet_boundary_inner = (
+            inhomogenous_dirichlet_boundary[1:-1, 1:-1]
+        )
+
+    def solve(self, f, inhomgenous_dirichlet=False):
+        if inhomgenous_dirichlet:
+            f_t = f + self.inhomogenous_dirichlet_boundary_inner
+            return self.Laplacian.Linv_v(f_t)
+        else:
+            return self.Laplacian.Linv_v(f)
+
+
+class PoissonCylindricalOld:
+    def __init__(self, rho, z, m=0):
+
+        self.rho = rho
+        self.z = z
+        self.drho = rho[1] - rho[0]
+        self.dz = z[1] - z[0]
+        self.rho_inner = rho[1:-1]
+        self.z_inner = z[1:-1]
+        self.n_rho = len(self.rho_inner)
+        self.n_z = len(self.z_inner)
+        self.m = m
+        ########################################################################################
+
+        L_rho = np.zeros((self.n_rho, self.n_rho))
+        for i in range(self.n_rho):
+            L_rho[i, i] = -2 / self.drho**2
+            if i < self.n_rho - 1:
+                L_rho[i, i + 1] = (self.rho_inner[i] + self.drho / 2) / (
+                    self.drho**2
+                    * np.sqrt(self.rho_inner[i] * self.rho_inner[i + 1])
+                )
+            if i > 0:
+                L_rho[i, i - 1] = (self.rho_inner[i] - self.drho / 2) / (
+                    self.drho**2
+                    * np.sqrt(self.rho_inner[i - 1] * self.rho_inner[i])
+                )
+
+        if self.m == 0:
+            # Add Neumann boundary condition
+            L_rho[0, 0] += (self.rho_inner[0] - self.drho / 2) / (
+                self.drho**2 * self.rho_inner[0]
+            )
+
+        L_rho -= np.diag(self.m**2 / self.rho_inner**2)
+
+        self.lambda_rho, self.U_rho = np.linalg.eigh(L_rho)
+
+        L_z = np.zeros((self.n_z, self.n_z))
+        for i in range(self.n_z):
+            L_z[i, i] = -2 / self.dz**2
+            if i < self.n_z - 1:
+                L_z[i, i + 1] = 1 / self.dz**2
+            if i > 0:
+                L_z[i, i - 1] = 1 / self.dz**2
+
+        self.lamdbda_z, self.U_z = np.linalg.eigh(L_z)
+
+        self.Dinv = 1 / (self.lambda_rho[:, np.newaxis] + self.lamdbda_z)
+        ########################################################################################
+
+    def solve(self, f):
+        """
+        Solve the Poisson equation
+
+        Parameters:
+        f (ndarray): The right-hand side of the Poisson equation.
+
+        Returns:
+        ndarray: The solution w(rho, z) of the Poisson equation.
+        """
+        tmp = np.dot(self.U_rho.T, np.dot(f, self.U_z))
+        tmp2 = np.multiply(self.Dinv, tmp)
+        w_sol = np.dot(self.U_rho, np.dot(tmp2, self.U_z.T))
+        return w_sol
